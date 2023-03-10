@@ -59,6 +59,14 @@ var notifyCmd = &cobra.Command{
 	},
 }
 
+var notifyGenCmd = &cobra.Command{
+	Use:   "generate-rr",
+	Short: "Generate the RFC 3597 representation of a NOTIFY record",
+	Run: func(cmd *cobra.Command, args []string) {
+		GenerateNotifyRR("", 0, 0, "")
+	},
+}
+
 var notifyCdsCmd = &cobra.Command{
 	Use:   "cds",
 	Short: "Send a Notify(CDS) to parent of zone",
@@ -94,6 +102,7 @@ var notifySoaCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(notifyCmd)
 	notifyCmd.AddCommand(notifyCdsCmd, notifyCsyncCmd, notifyDnskeyCmd, notifySoaCmd)
+	notifyCmd.AddCommand(notifyGenCmd)
 
 	notifyCmd.PersistentFlags().StringVarP(&zonename, "zone", "z", "", "Zone to send a parent notify for")
 }
@@ -182,6 +191,96 @@ func SendNotify(rrtypes []string) {
 		} else {
 			log.Fatalf("Error: answer is not an SRV RR: %s", rr.String())
 		}
+	}
+}
+
+func SendNotifyNG(rrtypes []string) {
+	if zonename == "" {
+		fmt.Printf("Error: zone name not specified. Terminating.\n")
+		os.Exit(1)
+	}
+
+	zonename = dns.Fqdn(zonename)
+	parentzone := ParentZone(zonename, imr, log.Default())
+	var qname string
+	var notify_type uint16
+
+	notify_types := map[uint16]bool{}
+
+	for _, rrtype := range rrtypes {
+		switch rrtype {
+		case "cds":
+			qname = fmt.Sprintf("_cds-notifications.%s", parentzone)
+			notify_type = dns.TypeCDS
+			notify_types[dns.TypeCDS] = true
+		case "csync":
+			qname = fmt.Sprintf("_csync-notifications.%s", parentzone)
+			notify_type = dns.TypeCSYNC
+			notify_types[dns.TypeCSYNC] = true
+		case "dnskey":
+			notify_type = dns.TypeDNSKEY
+			fmt.Printf("DNSKEY is a sideways NOTIFY for a Multi-Signer setup. Where do you want to send it?\n")
+			os.Exit(0)
+		case "soa":
+			notify_type = dns.TypeSOA
+			fmt.Printf("SOA is a normal NOTIFY. Where do you want to send it?\n")
+			os.Exit(0)
+		default:
+			fmt.Printf("Unknown NOTIFY RRtype: %s. Terminating.\n", rrtype)
+			os.Exit(1)
+		}
+	}
+	_ = notify_type
+
+	m := new(dns.Msg)
+	m.SetQuestion(parentzone, TypeNOTIFY)
+	res, err := dns.Exchange(m, imr)
+	if err != nil {
+		log.Fatalf("Error from dns.Exchange(%s, SRV): %v", zonename, err)
+	}
+
+	if res.Rcode != dns.RcodeSuccess {
+		log.Fatalf("Error: Query for %s NOTIFY received rcode: %s",
+			qname, dns.RcodeToString[res.Rcode])
+	}
+
+	fmt.Printf("response to NOTIFY query:\n%s\n", res.String())
+
+	if len(res.Answer) > 0 {
+		rr := res.Answer[0]
+		var notify *NOTIFY
+//		if notify, ok := rr.(*NOTIFY); ok {
+			if debug {
+				fmt.Printf("Looking up parent notification address:\n%s\n", rr.String())
+			}
+
+			msg := fmt.Sprintf("Sending %s Notification for zone %s to: %s:%d",
+				strings.ToUpper(rrtypes[0]), zonename, notify.Dest, notify.Port)
+
+			m = new(dns.Msg)
+			m.SetNotify(zonename)
+
+			m.Question = []dns.Question{} // remove SOA
+			for rrtype, _ := range notify_types {
+				m.Question = append(m.Question, dns.Question{zonename, rrtype, dns.ClassINET})
+			}
+
+			fmt.Printf("Sending Notify:\n%s\n", m.String())
+
+			res, err = dns.Exchange(m, fmt.Sprintf("%s:%d", notify.Dest, notify.Port))
+			if err != nil {
+				log.Fatalf("Error from dns.Exchange(%s, SRV): %v", zonename, err)
+			}
+
+			if res.Rcode != dns.RcodeSuccess {
+				fmt.Printf(msg+"... and got rcode %s back (bad)\n", dns.RcodeToString[res.Rcode])
+				log.Fatalf("Error: Rcode: %s", dns.RcodeToString[res.Rcode])
+			} else {
+				fmt.Printf(msg + "... and got rcode NOERROR back (good)\n")
+			}
+//		} else {
+			log.Fatalf("Error: answer is not an SRV RR: %s", rr.String())
+//		}
 	}
 }
 

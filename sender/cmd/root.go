@@ -6,6 +6,7 @@ package cmd
 
 import (
 //	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,10 @@ func Execute() {
 }
 
 func init() {
+        err := RegisterNotifyRR()
+	if err != nil {
+	   log.Fatalf("Error: %v", err)
+	}
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "D", false, "debug mode")
 }
 
