@@ -1,0 +1,7 @@
+dnsengine:
+   addresses:	[ 127.0.0.1:5302 ]
+   verbose:	true
+   debug:	true
+
+scanner:
+   interval:	60
