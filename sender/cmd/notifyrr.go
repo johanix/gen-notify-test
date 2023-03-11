@@ -1,7 +1,7 @@
 package cmd
 
 import (
-        "encoding/binary"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -12,8 +12,8 @@ import (
 )
 
 const (
-      TypeAPAIR = 0x0F99
-      TypeNOTIFY = 0x0F9A
+	TypeAPAIR  = 0x0F99
+	TypeNOTIFY = 0x0F9A
 )
 
 type APAIR struct {
@@ -21,10 +21,11 @@ type APAIR struct {
 }
 
 type NOTIFY struct {
-     Type   uint16
-     Scheme uint8
-     Port   uint16
-     Dest   string
+	// Hdr    dns.RR_Header
+	Type   uint16
+	Scheme uint8
+	Port   uint16
+	Dest   string
 }
 
 func NewAPAIR() dns.PrivateRdata { return new(APAIR) }
@@ -33,10 +34,12 @@ func NewNOTIFY() dns.PrivateRdata { return new(NOTIFY) }
 
 func (rd *APAIR) String() string { return rd.addr[0].String() + " " + rd.addr[1].String() }
 
-func (rd *NOTIFY) StringOLD() string { return dns.TypeToString[rd.Type] + " " + string(rd.Scheme) + " " + string(rd.Port) + " " + rd.Dest }
+func (rd *NOTIFY) StringOLD() string {
+	return dns.TypeToString[rd.Type] + " " + string(rd.Scheme) + " " + string(rd.Port) + " " + rd.Dest
+}
 
-func (rd *NOTIFY) String() string {
-     return fmt.Sprintf("%s %d %d %s", dns.TypeToString[rd.Type], rd.Scheme, rd.Port, rd.Dest)
+func (rd NOTIFY) String() string {
+	return fmt.Sprintf("%s %d %d %s", dns.TypeToString[rd.Type], rd.Scheme, rd.Port, rd.Dest)
 }
 
 func (rd *APAIR) Parse(txt []string) error {
@@ -66,7 +69,7 @@ func (rd *NOTIFY) Parse(txt []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid NOTIFY scheme: %s. Error: %v", txt[1], err)
 	}
-	
+
 	port, err := strconv.Atoi(txt[2])
 	if err != nil {
 		return fmt.Errorf("invalid NOTIFY port: %s. Error: %v", txt[2], err)
@@ -107,7 +110,7 @@ func unpackUint16(msg []byte, off int) (i uint16, off1 int, err error) {
 	return binary.BigEndian.Uint16(msg[off:]), off + 2, nil
 }
 
-func packUint16 (i uint16, msg []byte, off int) (off1 int, err error) {
+func packUint16(i uint16, msg []byte, off int) (off1 int, err error) {
 	if off+2 > len(msg) {
 		return len(msg), errors.New("overflow packing uint16")
 	}
@@ -125,27 +128,27 @@ func (rd *APAIR) Pack(buf []byte) (int, error) {
 }
 
 func (rd *NOTIFY) Pack(buf []byte) (int, error) {
-        var off int
-        off, err := packUint16(rd.Type, buf, off)
+	var off int
+	off, err := packUint16(rd.Type, buf, off)
 	if err != nil {
-	   return off, err
+		return off, err
 	}
 
 	off, err = packUint8(rd.Scheme, buf, off)
 	if err != nil {
-	   return off, err
+		return off, err
 	}
 
 	off, err = packUint16(rd.Port, buf, off)
 	if err != nil {
-	   return off, err
+		return off, err
 	}
 
 	off, err = dns.PackDomainName(rd.Dest, buf, 0, nil, false)
 	if err != nil {
-	   return off, err
+		return off, err
 	}
-	
+
 	return off, nil
 }
 
@@ -164,8 +167,8 @@ func (rd *APAIR) Unpack(buf []byte) (int, error) {
 }
 
 func (rd *NOTIFY) Unpack(buf []byte) (int, error) {
-//	rdStart := off
-//	_ = rdStart
+	//	rdStart := off
+	//	_ = rdStart
 	var off = 0
 	var err error
 
@@ -225,17 +228,32 @@ func (rd *NOTIFY) Copy(dest dns.PrivateRdata) error {
 	return nil
 }
 
-func (rd *NOTIFY) Header() *dns.RR_Header {
-     var hdr = dns.RR_Header{}
-     return &hdr
-}
+// func (rd *NOTIFY) copy() dns.RR {
+//      n := NOTIFY{ rd.Hdr, rd.Type, rd.Scheme, rd.Port, rd.Dest }
+//     return dns.RR(n)
+// }
 
-func (rd *APAIR) Len() int {
-	return net.IPv4len * 2
+// func (rd *NOTIFY) Copy() dns.RR {
+//     n := NOTIFY{ rd.Hdr, rd.Type, rd.Scheme, rd.Port, rd.Dest }
+//     return dns.RR(n)
+// }
+
+// func (rr NOTIFY) copy() dns.RR {
+//     n := NOTIFY{ rr.Hdr, rr.Type, rr.Scheme, rr.Port, rr.Dest }
+//     return dns.RR(n)
+// }
+
+func (rd NOTIFY) Header() *dns.RR_Header {
+	var hdr = dns.RR_Header{}
+	return &hdr
 }
 
 func (rd *NOTIFY) Len() int {
 	return 1 + 2 + 2 + len(rd.Dest)
+}
+
+func (rd *APAIR) Len() int {
+	return net.IPv4len * 2
 }
 
 func xmain() {

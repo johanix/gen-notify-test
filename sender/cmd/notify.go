@@ -47,8 +47,8 @@ var notifyCmd = &cobra.Command{
 				}
 
 			} else {
-			       fmt.Printf("Warning: arg '%s' does not contain a '+'. Terminating.\n", arg)
-			       os.Exit(1)
+				fmt.Printf("Warning: arg '%s' does not contain a '+'. Terminating.\n", arg)
+				os.Exit(1)
 			}
 		}
 		rrtypes := []string{}
@@ -248,39 +248,44 @@ func SendNotifyNG(rrtypes []string) {
 
 	if len(res.Answer) > 0 {
 		rr := res.Answer[0]
-		var notify *NOTIFY
-//		if notify, ok := rr.(*NOTIFY); ok {
+		// var notify *NOTIFY
+		if prr, ok := rr.(*dns.PrivateRR); ok {
 			if debug {
 				fmt.Printf("Looking up parent notification address:\n%s\n", rr.String())
 			}
 
-			msg := fmt.Sprintf("Sending %s Notification for zone %s to: %s:%d",
-				strings.ToUpper(rrtypes[0]), zonename, notify.Dest, notify.Port)
+			if notify, ok := prr.Data.(*NOTIFY); ok {
 
-			m = new(dns.Msg)
-			m.SetNotify(zonename)
+				msg := fmt.Sprintf("Sending %s Notification for zone %s to: %s:%d",
+					strings.ToUpper(rrtypes[0]), zonename, notify.Dest, notify.Port)
 
-			m.Question = []dns.Question{} // remove SOA
-			for rrtype, _ := range notify_types {
-				m.Question = append(m.Question, dns.Question{zonename, rrtype, dns.ClassINET})
-			}
+				m = new(dns.Msg)
+				m.SetNotify(zonename)
 
-			fmt.Printf("Sending Notify:\n%s\n", m.String())
+				m.Question = []dns.Question{} // remove SOA
+				for rrtype, _ := range notify_types {
+					m.Question = append(m.Question, dns.Question{zonename, rrtype, dns.ClassINET})
+				}
 
-			res, err = dns.Exchange(m, fmt.Sprintf("%s:%d", notify.Dest, notify.Port))
-			if err != nil {
-				log.Fatalf("Error from dns.Exchange(%s, SRV): %v", zonename, err)
-			}
+				fmt.Printf("Sending Notify:\n%s\n", m.String())
 
-			if res.Rcode != dns.RcodeSuccess {
-				fmt.Printf(msg+"... and got rcode %s back (bad)\n", dns.RcodeToString[res.Rcode])
-				log.Fatalf("Error: Rcode: %s", dns.RcodeToString[res.Rcode])
+				res, err = dns.Exchange(m, fmt.Sprintf("%s:%d", notify.Dest, notify.Port))
+				if err != nil {
+					log.Fatalf("Error from dns.Exchange(%s, SRV): %v", zonename, err)
+				}
+
+				if res.Rcode != dns.RcodeSuccess {
+					fmt.Printf(msg+"... and got rcode %s back (bad)\n", dns.RcodeToString[res.Rcode])
+					log.Fatalf("Error: Rcode: %s", dns.RcodeToString[res.Rcode])
+				} else {
+					fmt.Printf(msg + "... and got rcode NOERROR back (good)\n")
+				}
 			} else {
-				fmt.Printf(msg + "... and got rcode NOERROR back (good)\n")
+				log.Fatalf("Error: answer is not an NOTIFY RR: %s", rr.String())
 			}
-//		} else {
-			log.Fatalf("Error: answer is not an SRV RR: %s", rr.String())
-//		}
+		} else {
+			log.Fatalf("Error: answer is not an PrivateRR: %s", rr.String())
+		}
 	}
 }
 
@@ -311,12 +316,12 @@ func ParentZone(z, imr string, lg *log.Logger) string {
 				return parent
 			}
 			if len(r.Ns) > 0 {
-			   for _, rr := range r.Ns {
-			        if rr.Header().Rrtype == dns.TypeSOA {
-				   parent = r.Ns[0].Header().Name
-				   return parent
+				for _, rr := range r.Ns {
+					if rr.Header().Rrtype == dns.TypeSOA {
+						parent = r.Ns[0].Header().Name
+						return parent
+					}
 				}
-			    }
 			}
 
 			lg.Printf("ParentZone: ERROR: Failed to locate parent of '%s' via Answer and Authority. Now guessing.", z)
@@ -326,4 +331,3 @@ func ParentZone(z, imr string, lg *log.Logger) string {
 	lg.Printf("ParentZone: had difficulties splitting zone '%s'\n", z)
 	return z
 }
-
