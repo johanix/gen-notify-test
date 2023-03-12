@@ -42,10 +42,10 @@ func ScannerEngine(scannerq chan ScanRequest) error {
 				switch sr.Cmd {
 				case "SCAN":
 					if sr.ZoneName == "" {
-						log.Printf("Request for manual %s scan.", sr.RRtype)
+						log.Printf("Scanner: Request for manual %s scan.", sr.RRtype)
 						// scanner.Run(sr.RRtype)
 					} else {
-						log.Printf("Request for immediate scan of zone %s for RRtype %s",
+						log.Printf("Scanner: Request for immediate scan of zone %s for RRtype %s",
 							sr.ZoneName, sr.RRtype)
 						switch sr.RRtype {
 						case "CDS":

@@ -3,7 +3,7 @@
  */
 package main
 
-import "sender/cmd"
+import "notify/cmd"
 
 func main() {
 	cmd.Execute()

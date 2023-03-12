@@ -39,10 +39,10 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 		zone := r.Question[0].Name
 
-		log.Printf("DnsHandler: msg received: %s", r.String())
+		// log.Printf("DnsHandler: msg received: %s", r.String())
 
 		if r.Opcode == dns.OpcodeNotify {
-			log.Printf("Received NOTIFY for zone '%s' containing %d RRs", zone, len(r.Question))
+			// log.Printf("Received NOTIFY for zone '%s' containing %d RRs", zone, len(r.Question))
 			// send NOERROR response
 			m := new(dns.Msg)
 			m.SetReply(r)
@@ -52,9 +52,9 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			for i := 0; i <= len(r.Question)-1; i++ {
 				m := r.Question[i]
 				qtype = dns.TypeToString[m.Qtype]
-				log.Printf("Processing Question[%d]: %s %s", i, zone, qtype)
+				// log.Printf("DnsEngine: Processing Question[%d]: %s %s", i, zone, qtype)
 				if verbose {
-					log.Printf("Received NOTIFY %s for zone %s", qtype, zone)
+					log.Printf("DnsEngine: Received NOTIFY(%s) for zone %s", qtype, zone)
 				}
 				scannerq <- ScanRequest{Cmd: "SCAN", ZoneName: zone, RRtype: qtype}
 			}
