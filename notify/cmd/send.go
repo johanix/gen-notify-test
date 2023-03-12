@@ -20,7 +20,6 @@ var imr = "8.8.8.8:53"
 var sendCmd = &cobra.Command{
 	Use:   "send",
 	Short: "The 'notify send' command is only usable via defined sub-commands",
-	},
 }
 
 var sendCdsCmd = &cobra.Command{

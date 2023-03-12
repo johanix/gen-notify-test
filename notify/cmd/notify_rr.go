@@ -8,15 +8,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/miekg/dns"
 )
 
-const (
-	TypeNOTIFY = 0x0F9A
-)
+const TypeNOTIFY = 0x0F9A
 
 type NOTIFY struct {
 	Type   uint16
