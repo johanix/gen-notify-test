@@ -1,5 +1,5 @@
 dnsengine:
-   addresses:	[ 127.0.0.1:5302 ]
+   addresses:	[ 127.0.0.1:5302, 127.0.0.1:5303 ]
    verbose:	true
    debug:	true
 

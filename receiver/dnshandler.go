@@ -18,15 +18,18 @@ func DnsEngine(scannerq chan ScanRequest) error {
 	debug := viper.GetBool("dnsengine.debug")
 	dns.HandleFunc(".", createHandler(scannerq, verbose, debug))
 
+	log.Printf("DnsEngine: addresses: %v", addresses)
 	for _, addr := range addresses {
 		for _, net := range []string{"udp", "tcp"} {
-			log.Printf("DnsEngine: serving on %s (%s)\n", addr, net)
-			server := &dns.Server{Addr: addr, Net: net }
-			if err := server.ListenAndServe(); err != nil {
-				log.Printf("Failed to setup the %s server: %s\n", net, err.Error())
-			} else {
-				log.Printf("DnsEngine: listening on %s/%s\n", addr, net)
-			}
+			go func(addr, net string) {
+				log.Printf("DnsEngine: serving on %s (%s)\n", addr, net)
+				server := &dns.Server{Addr: addr, Net: net}
+				if err := server.ListenAndServe(); err != nil {
+					log.Printf("Failed to setup the %s server: %s\n", net, err.Error())
+				} else {
+					log.Printf("DnsEngine: listening on %s/%s\n", addr, net)
+				}
+			}(addr, net)
 		}
 	}
 	return nil

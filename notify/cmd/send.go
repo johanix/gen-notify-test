@@ -26,7 +26,7 @@ var sendCdsCmd = &cobra.Command{
 	Use:   "cds",
 	Short: "Send a Notify(CDS) to parent of zone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(zonename, "CDS")
+		SendNotify(dns.Fqdn(zonename), "CDS")
 	},
 }
 
@@ -34,7 +34,7 @@ var sendCsyncCmd = &cobra.Command{
 	Use:   "csync",
 	Short: "Send a Notify(CSYNC) to parent of zone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(zonename, "CSYNC")
+		SendNotify(dns.Fqdn(zonename), "CSYNC")
 	},
 }
 
@@ -42,7 +42,7 @@ var sendDnskeyCmd = &cobra.Command{
 	Use:   "dnskey",
 	Short: "Send a Notify(DNSKEY) to other signers of zone (multi-signer setup)",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(zonename, "DNSKEY")
+		SendNotify(dns.Fqdn(zonename), "DNSKEY")
 	},
 }
 
@@ -50,7 +50,7 @@ var sendSoaCmd = &cobra.Command{
 	Use:   "soa",
 	Short: "Send a normal Notify(SOA) to someone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(zonename, "SOA")
+		SendNotify(dns.Fqdn(zonename), "SOA")
 	},
 }
 
@@ -84,16 +84,22 @@ func init() {
 }
 
 func SendNotify(zonename string, ntype string) {
-	if zonename == "" {
+        var lookupzone string
+	if zonename == "." {
 		fmt.Printf("Error: zone name not specified. Terminating.\n")
 		os.Exit(1)
 	}
 
-	zonename = dns.Fqdn(zonename)
-	parentzone := ParentZone(zonename, imr, log.Default())
+	switch ntype {
+	case "DNSKEY":
+		lookupzone = zonename
+	default:
+		lookupzone = ParentZone(zonename, imr)
+	}
+	
 	var notify_type = dns.StringToType[ntype]
 
-	prrs, err := NotifyQuery(parentzone)
+	prrs, err := NotifyQuery(lookupzone)
 
 	found := false
 	var notify_rr *dns.PrivateRR
@@ -106,7 +112,7 @@ func SendNotify(zonename string, ntype string) {
 		}
 	}
 	if !found {
-		fmt.Printf("No notification destination found for NOTIFY(%s) to zone %s. Ignoring.\n",
+		fmt.Printf("No notification destination found for NOTIFY(%s) for zone %s. Ignoring.\n",
 			ntype, zonename)
 		os.Exit(1)
 	}
@@ -114,8 +120,8 @@ func SendNotify(zonename string, ntype string) {
 	notify, _ := notify_rr.Data.(*NOTIFY)
 
 	if verbose {
-		fmt.Printf("Looked up published notification address for NOTIFY(%s) to parent zone %s:\n%s\n",
-			ntype, parentzone, notify_rr.String())
+		fmt.Printf("Looked up published notification address for NOTIFY(%s) for zone %s:\n\n%s\n\n",
+			ntype, zonename, notify_rr.String())
 	}
 
 	dest_addrs, err := net.LookupHost(notify.Dest)
@@ -135,17 +141,17 @@ func SendNotify(zonename string, ntype string) {
 		m := new(dns.Msg)
 		m.SetNotify(zonename)
 
-		m.Question = []dns.Question{
-			dns.Question{zonename, notify_type, dns.ClassINET},
-		} // remove SOA, add ntype
+		// remove SOA, add ntype
+		m.Question = []dns.Question{ dns.Question{zonename, notify_type, dns.ClassINET} } 
 
 		if debug {
 			fmt.Printf("Sending Notify:\n%s\n", m.String())
 		}
 
-		res, err := dns.Exchange(m, fmt.Sprintf("%s:%d", dst, notify.Port))
+		dst = net.JoinHostPort(dst, fmt.Sprintf("%d", notify.Port))
+		res, err := dns.Exchange(m, dst)
 		if err != nil {
-			log.Fatalf("Error from dns.Exchange(%s, NOTIFY(%s)): %v", parentzone, notify_type, err)
+			log.Fatalf("Error from dns.Exchange(%s, NOTIFY(%s)): %v", dst, ntype, err)
 		}
 
 		if res.Rcode != dns.RcodeSuccess {
@@ -162,7 +168,7 @@ func SendNotify(zonename string, ntype string) {
 	}
 }
 
-func ParentZone(z, imr string, lg *log.Logger) string {
+func ParentZone(z, imr string) string {
 	labels := strings.Split(z, ".")
 	var parent string
 
@@ -176,9 +182,6 @@ func ParentZone(z, imr string, lg *log.Logger) string {
 		m.SetEdns0(4096, true)
 		m.CheckingDisabled = true
 
-		if imr[len(imr)-3:] != ":53" {
-			imr = net.JoinHostPort(imr, "53")
-		}
 		r, err := dns.Exchange(m, imr)
 		if err != nil {
 			return fmt.Sprintf("Error from dns.Exchange: %v\n", err)
@@ -197,10 +200,10 @@ func ParentZone(z, imr string, lg *log.Logger) string {
 				}
 			}
 
-			lg.Printf("ParentZone: ERROR: Failed to locate parent of '%s' via Answer and Authority. Now guessing.", z)
+			log.Printf("ParentZone: ERROR: Failed to locate parent of '%s' via Answer and Authority. Now guessing.", z)
 			return upone
 		}
 	}
-	lg.Printf("ParentZone: had difficulties splitting zone '%s'\n", z)
+	log.Printf("ParentZone: had difficulties splitting zone '%s'\n", z)
 	return z
 }

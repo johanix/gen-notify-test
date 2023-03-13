@@ -62,7 +62,7 @@ func NotifyQuery(z string) ([]*dns.PrivateRR, error) {
 		for _, rr := range res.Answer {
 			if prr, ok := rr.(*dns.PrivateRR); ok {
 				if debug {
-					fmt.Printf("Looking up parent NOTIFY RRset:\n%s\n", rr.String())
+					fmt.Printf("Looking up %s NOTIFY RRset:\n%s\n", z, rr.String())
 				}
 
 				if _, ok := prr.Data.(*NOTIFY); ok {
