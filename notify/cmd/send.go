@@ -58,11 +58,19 @@ var torfc3597Cmd = &cobra.Command{
 	Use:   "rfc3597",
 	Short: "Generate the RFC 3597 representation of a DNS record",
 	Run: func(cmd *cobra.Command, args []string) {
+	        if rrstr == "" {
+		   log.Fatalf("Record to generate RFC 3597 representation for not specified.")
+		}
+		
 		rr, err := dns.NewRR(rrstr)
 		if err != nil {
-			log.Fatal("could not parse record \"%s\": %v", rrstr, err)
+			log.Fatal("Could not parse record \"%s\": %v", rrstr, err)
 		}
-		GenerateRFC3597(rr)
+
+		fmt.Printf("Normal   (len=%d): \"%s\"\n", dns.Len(rr), rr.String())
+		u := new(dns.RFC3597)
+		u.ToRFC3597(rr)
+		fmt.Printf("RFC 3597 (len=%d): \"%s\"\n", dns.Len(u), u.String())
 	},
 }
 

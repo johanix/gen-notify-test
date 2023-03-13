@@ -5,20 +5,35 @@ Demo code for draft-thomassen-generalised-dns-notify-NN
 Here is some simple Go code to play with generalised DNS notifications a la
 draft-thomassen-generalised-dns-notify-01.
 
+There are two parts to this code. The first is the "receiver". This is
+a fake scanner that also listens for generalised notifications. In the
+absence of any generalised notifications it will just periodically run
+the complete scanner (which does nothing). When a notification comes
+in it will be put into a queue for immediate scanning (which also does
+nothing). The only real use of the receiver is the log output.
+
+The second part is the "notifier". This is a CLI test and demo utility
+that can do three things: (a) send queries for the private RR "NOTIFY",
+(b) generate RFC 3597 representation of the NOTIFY RR to be put in a
+parent zone and (c) send NOTIFY(CDS) or NOTIFY(CSYNC) to the destination
+specified by a NOTIFY RRset in a parent zone.
+
 1. Build the receiver (i.e. the server that will listen for NOTIFY):
    (cd receiver/ ; go build)
 
-2. Check the config in receiver.yaml. It must specify at least a
+2. Check the config in receiver.yaml. It must specify at least an
    address and a port on which to listen, as well as a scanner interval
-   (time in seconds between periodic scanner runs).
+   (time in seconds between periodic fake scanner runs).
 
 3. Start the receiver. By default it will listen on 127.0.0.1:5302 and
    the only thing it does is to fake a periodic scanning of child
-   zones and listen for notifications about specific scan requests.
+   zones and listen for notifications about specific scan requests for
+   particular child zones. Note that it reads its config from the
+   current directory.
    
    (cd reciever ; ./receiver)
 
-4. Build the test utility.
+4. Build the test utility. Preferably in a separate window.
    (cd notify ; go build)
 
 5. Generate suitable RFC 3597 records to put in your parent zone:
@@ -33,7 +48,7 @@ draft-thomassen-generalised-dns-notify-01.
 6. Publish the RFC 3597 records in the parent zone, plus at least one address record for the
    actual notification address. The simplest alternative is to use 127.0.0.1:
 
-notifications.parent.example.	IN	A	127.0.0.1
+   notifications.parent.example.	IN	A	127.0.0.1
 
    Note that the IP address (127.0.0.1) and the port (5302) must be the
    same as specified in receiver.yaml (so that the receiver listens in

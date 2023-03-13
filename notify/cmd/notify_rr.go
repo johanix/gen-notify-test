@@ -174,9 +174,3 @@ func RegisterNotifyRR() error {
 	return nil
 }
 
-func GenerateRFC3597(rr dns.RR) {
-        fmt.Printf("Normal   (len=%d): \"%s\"\n", dns.Len(rr), rr.String())
-	u := new(dns.RFC3597)
-	u.ToRFC3597(rr)
-	fmt.Printf("RFC 3597 (len=%d): \"%s\"\n", dns.Len(u), u.String())
-}
