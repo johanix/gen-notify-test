@@ -86,8 +86,23 @@ Notes:
 	./notify send cds+csync --zone foo.parent.example
 
    That works fine in the sender end, but in the receiver end
-   it requires a minor (4 lines or so) modification to the Golang
+   it requires the following minor modification to the Golang
    dns package. Otherwise the reciever will return FORMERR.
 
-2. This code needs to be updated to use a private DNS type for the proposed
-   NOTIFY RR type from the -01 version of the draft.
+diff --git a/acceptfunc.go b/acceptfunc.go
+index ac479db9..ef59f3e7 100644
+--- a/acceptfunc.go
++++ b/acceptfunc.go
+@@ -45,7 +45,10 @@ func defaultMsgAcceptFunc(dh Header) MsgAcceptAction {
+        }
+ 
+        if dh.Qdcount != 1 {
+-               return MsgReject
++          if opcode == OpcodeNotify {
++             return MsgAccept
++          }
++          return MsgReject
+        }
+        // NOTIFY requests can have a SOA in the ANSWER section. See RFC 1996 Section 3.7 and 3.11.
+        if dh.Ancount > 1 {
+
