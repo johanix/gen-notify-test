@@ -20,7 +20,7 @@ specified by a NOTIFY RRset in a parent zone.
 
 1. Build the receiver (i.e. the server that will listen for NOTIFY):
 ```
-   (cd receiver/ ; go build)
+   # (cd receiver/ ; go build)
 ```
 
 2. Check the config in receiver.yaml. It must specify at least an
@@ -33,21 +33,21 @@ specified by a NOTIFY RRset in a parent zone.
    particular child zones. Note that it reads its config from the
    current directory.
 ```   
-   (cd reciever ; ./receiver)
+   # (cd reciever ; ./receiver)
 ```
 
 4. Build the test utility. Preferably in a separate window.
 ```
-   (cd notify ; go build)
+   # (cd notify ; go build)
 ```
 
 5. Generate suitable RFC 3597 records to put in your parent zone:
 
 ```
-   #./notify rfc3597 --record "parent.example. NOTIFY CDS 1 5302 notifications.parent.example."
+   # ./notify rfc3597 --record "parent.example. NOTIFY CDS 1 5302 notifications.parent.example."
    Normal  : "parent.example.     3600    IN      NOTIFY  CDS     1 5302 notifications.parent.example."
    RFC 3597: "parent.example.     3600    CLASS1  TYPE3994        \# 35 003b0114b60d6e6f74696669636174696f6e73076578616d706c6506706172656e7400"
-   #./notify rfc3597 --record "parent.example. NOTIFY CSYNC 1 5302 notifications.parent.example."
+   # ./notify rfc3597 --record "parent.example. NOTIFY CSYNC 1 5302 notifications.parent.example."
    Normal  : "parent.example.     3600    IN      NOTIFY  CSYNC   1 5302 notifications.parent.example."
    RFC 3597: "parent.example.     3600    CLASS1  TYPE3994        \# 35 003e0114b60d6e6f74696669636174696f6e73076578616d706c6506706172656e7400"
 ```
@@ -63,29 +63,29 @@ specified by a NOTIFY RRset in a parent zone.
 
 6. Play with the test utility:
 ```
-   cd notify/
+   # cd notify/
 ```
 	1. Send queries:
 ```
-	#./notify query --zone axfr.net
-    parent.example.   3600    IN  NOTIFY  CDS     1 5302 notifications.parent.example.
-    parent.example.   3600    IN  NOTIFY  CSYNC   1 5302 notifications.parent.example.
+   # ./notify query --zone axfr.net
+   parent.example.   3600    IN  NOTIFY  CDS     1 5302 notifications.parent.example.
+   parent.example.   3600    IN  NOTIFY  CSYNC   1 5302 notifications.parent.example.
 ```
 	
     2. Send a NOTIFY(CDS) for child.parent.example:
 ```
-	#./notify send cds --zone child.parent.example
+   # ./notify send cds --zone child.parent.example
 ```	
 	(the only visible result is in the receiver end)
 	
 	3. See more details by using the verbose flag:
 ```
-	#./notify send cds --zone foo.parent.example -v
-	Looked up published notification address for NOTIFY(CDS) to parent zone parent.example.:
-	parent.example.       3600    IN      NOTIFY  CDS     1 5302 notifications.parent.example.
-	notifications.parent.example. has the IP addresses: [127.0.0.1]
-	Sending NOTIFY(CDS) to notifications.parent.example. on address 127.0.0.1:5302
-	... and got rcode NOERROR back (good)
+   # ./notify send cds --zone foo.parent.example -v
+   Looked up published notification address for NOTIFY(CDS) to parent zone parent.example.:
+   parent.example.       3600    IN      NOTIFY  CDS     1 5302 notifications.parent.example.
+   notifications.parent.example. has the IP addresses: [127.0.0.1]
+   Sending NOTIFY(CDS) to notifications.parent.example. on address 127.0.0.1:5302
+   ... and got rcode NOERROR back (good)
 ```
 
 Notes:
@@ -93,7 +93,7 @@ Notes:
 1. There is (experimental) support for sending multiple notifications in the
    same message:
 ```
-	./notify send cds+csync --zone foo.parent.example
+   # ./notify send cds+csync --zone foo.parent.example
 ``
    That works fine in the sender end, but in the receiver end
    it requires the following minor modification to the Golang
