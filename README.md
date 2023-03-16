@@ -76,9 +76,11 @@ specified by a NOTIFY RRset in a parent zone.
 ```
    # ./notify send cds --zone child.parent.example
 ```	
+
 	(the only visible result is in the receiver end)
 	
 	3. See more details by using the verbose flag:
+
 ```
    # ./notify send cds --zone foo.parent.example -v
    Looked up published notification address for NOTIFY(CDS) to parent zone parent.example.:
