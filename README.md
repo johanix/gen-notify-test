@@ -99,7 +99,7 @@ Notes:
    same message:
 ```
    # ./notify send cds+csync --zone foo.parent.example
-``
+```
    That works fine in the sender end, but in the receiver end
    it requires the following minor modification to the Golang
    dns package. Otherwise the reciever will return FORMERR.
