@@ -65,7 +65,9 @@ specified by a NOTIFY RRset in a parent zone.
 ```
    # cd notify/
 ```
+
 	1. Send queries:
+
 ```
    # ./notify query --zone axfr.net
    parent.example.   3600    IN  NOTIFY  CDS     1 5302 notifications.parent.example.
@@ -73,6 +75,7 @@ specified by a NOTIFY RRset in a parent zone.
 ```
 	
     2. Send a NOTIFY(CDS) for child.parent.example:
+
 ```
    # ./notify send cds --zone child.parent.example
 ```	
