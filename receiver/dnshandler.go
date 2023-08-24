@@ -42,16 +42,16 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 		zone := r.Question[0].Name
 
-		// log.Printf("DnsHandler: msg received: %s", r.String())
+		log.Printf("DnsHandler: msg received: %s", r.String())
 
-		if r.Opcode == dns.OpcodeNotify {
+		switch r.Opcode {
+		case dns.OpcodeNotify:
 			// log.Printf("Received NOTIFY for zone '%s' containing %d RRs", zone, len(r.Question))
 			// send NOERROR response
 			m := new(dns.Msg)
 			m.SetReply(r)
 			w.WriteMsg(m)
 
-			// for i, m := range r.Question {
 			for i := 0; i <= len(r.Question)-1; i++ {
 				m := r.Question[i]
 				qtype = dns.TypeToString[m.Qtype]
@@ -62,6 +62,27 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 				scannerq <- ScanRequest{Cmd: "SCAN", ZoneName: zone, RRtype: qtype}
 			}
 			return
+
+		case dns.OpcodeUpdate:
+			log.Printf("Received UPDATE for zone '%s' containing %d RRs", zone, len(r.Question))
+			// send NOERROR response
+			m := new(dns.Msg)
+			m.SetReply(r)
+			w.WriteMsg(m)
+
+			for i := 0; i <= len(r.Question)-1; i++ {
+				m := r.Question[i]
+				qtype = dns.TypeToString[m.Qtype]
+				log.Printf("DnsEngine: Processing Question[%d]: %s %s", i, zone, qtype)
+				if verbose {
+					log.Printf("DnsEngine: Received UPDATE for delegation %s", qtype, m.Name)
+				}
+			}
+			return
+
+		default:
+			log.Printf("Error: unable to handle msgs of type %s",
+					   dns.OpcodeToString[r.Opcode])
 		}
 	}
 }

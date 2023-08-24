@@ -54,6 +54,14 @@ var sendSoaCmd = &cobra.Command{
 	},
 }
 
+var sendUpdateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Send a DDNS update to parent of zone",
+	Run: func(cmd *cobra.Command, args []string) {
+		SendUpdate(dns.Fqdn(zonename), []dns.RR{}, []dns.RR{})
+	},
+}
+
 var torfc3597Cmd = &cobra.Command{
 	Use:   "rfc3597",
 	Short: "Generate the RFC 3597 representation of a DNS record",
@@ -98,6 +106,7 @@ func SendNotify(zonename string, ntype string) {
 	}
 	
 	var notify_type = dns.StringToType[ntype]
+	const notify_scheme = 1
 
 	prrs, err := NotifyQuery(lookupzone)
 
@@ -105,7 +114,7 @@ func SendNotify(zonename string, ntype string) {
 	var notify_rr *dns.PrivateRR
 
 	for _, prr := range prrs {
-		if prr.Data.(*NOTIFY).Type == notify_type {
+		if prr.Data.(*NOTIFY).Scheme == notify_scheme && prr.Data.(*NOTIFY).Type == notify_type {
 			found = true
 			notify_rr = prr
 			break
@@ -135,7 +144,8 @@ func SendNotify(zonename string, ntype string) {
 
 	for _, dst := range dest_addrs {
 		if verbose {
-			fmt.Printf("Sending NOTIFY(%s) to %s on address %s:%d\n", ntype, notify.Dest, dst, notify.Port)
+			fmt.Printf("Sending NOTIFY(%s) to %s on address %s:%d\n",
+					    notify.Dest, dst, notify.Port)
 		}
 
 		m := new(dns.Msg)
@@ -152,6 +162,87 @@ func SendNotify(zonename string, ntype string) {
 		res, err := dns.Exchange(m, dst)
 		if err != nil {
 			log.Fatalf("Error from dns.Exchange(%s, NOTIFY(%s)): %v", dst, ntype, err)
+		}
+
+		if res.Rcode != dns.RcodeSuccess {
+		   	if verbose {
+			   fmt.Printf("... and got rcode %s back (bad)\n",
+			   		   dns.RcodeToString[res.Rcode])
+			}
+			log.Printf("Error: Rcode: %s", dns.RcodeToString[res.Rcode])
+		} else {
+			if verbose {
+				fmt.Printf("... and got rcode NOERROR back (good)\n")
+			}
+			break
+		}
+	}
+}
+
+func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR) {
+        var lookupzone string
+	if zonename == "." {
+		fmt.Printf("Error: zone name not specified. Terminating.\n")
+		os.Exit(1)
+	}
+
+	lookupzone = ParentZone(zonename, imr)
+	
+	const update_scheme = 2
+
+	prrs, err := NotifyQuery(lookupzone)
+
+	found := false
+	var dsync_rr *dns.PrivateRR
+
+	for _, prr := range prrs {
+		if prr.Data.(*NOTIFY).Scheme == update_scheme {
+			found = true
+			dsync_rr = prr
+			break
+		}
+	}
+	if !found {
+		fmt.Printf("No DDNS update destination found for for zone %s parent. Ignoring.\n",
+			zonename)
+		os.Exit(1)
+	}
+
+	dsync, _ := dsync_rr.Data.(*NOTIFY)
+
+	if verbose {
+		fmt.Printf("Looked up published DDNS update address for zone %s:\n\n%s\n\n",
+			zonename, dsync_rr.String())
+	}
+
+	dest_addrs, err := net.LookupHost(dsync.Dest)
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	if verbose {
+	   fmt.Printf("%s has the IP addresses: %v\n", dsync.Dest, dest_addrs)
+	}
+
+	for _, dst := range dest_addrs {
+		if verbose {
+			fmt.Printf("Sending DDNS update to %s on address %s:%d\n", dsync.Dest, dst, dsync.Port)
+		}
+
+		m := new(dns.Msg)
+		m.SetUpdate(lookupzone)
+
+		// remove SOA, add ntype
+		// m.Question = []dns.Question{ dns.Question{zonename, notify_type, dns.ClassINET} } 
+
+		if debug {
+			fmt.Printf("Sending Update:\n%s\n", m.String())
+		}
+
+		dst = net.JoinHostPort(dst, fmt.Sprintf("%d", dsync.Port))
+		res, err := dns.Exchange(m, dst)
+		if err != nil {
+			log.Fatalf("Error from dns.Exchange(%s, UPDATE): %v", dst, err)
 		}
 
 		if res.Rcode != dns.RcodeSuccess {
