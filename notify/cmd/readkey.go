@@ -53,6 +53,7 @@ to quickly create a Cobra application.`,
 		fmt.Printf("PubKey: %s\n", rr.String())
 		fmt.Printf("PrivKey (%s): %v\n", ktype, k)
 		fmt.Printf("crypto.Signer: %v\n", cs)
+		fmt.Printf("cs.Public(): %v\n", cs.Public())
 	},
 }
 
@@ -93,17 +94,10 @@ to quickly create a Cobra application.`,
 			    }
 		sigrr.RRSIG.KeyTag = keyrr.DNSKEY.KeyTag()
 		sigrr.RRSIG.Algorithm = keyrr.DNSKEY.Algorithm
-		incep := uint32(time.Now().UTC().Unix())
-		expir := incep + 300
-		sigrr.RRSIG.Inception = incep
-		sigrr.RRSIG.Expiration = expir
-		
-		fmt.Printf("sigrr: %v\n", sigrr.String())
-		
-//		mys := MySigner{
-//				privkey:	k,
-//				KeyRR:		*keyrr,
-//		       }
+		sigrr.RRSIG.Inception, sigrr.RRSIG.Expiration = sigLifetime(time.Now())
+		sigrr.RRSIG.SignerName = "alpha.dnslab."
+
+		fmt.Printf("SIG pre-signing: %v\n", sigrr.String())
 		
 		res, err := sigrr.Sign(cs, m)
 		if err != nil {
@@ -120,6 +114,14 @@ func init() {
 	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
 	readkeyCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 	signMsgCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
+}
+
+func sigLifetime(t time.Time) (uint32, uint32) {
+     sigJitter := time.Duration(60 * time.Second)
+     sigValidityInterval := time.Duration(1 * time.Hour)
+     incep := uint32(t.Add(sigJitter).Unix())
+     expir := uint32(t.Add(sigValidityInterval).Add(sigJitter).Unix())
+     return incep, expir
 }
 
 func ReadKey() (crypto.PrivateKey, crypto.Signer, dns.RR, string, error) {

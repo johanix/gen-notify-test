@@ -2,6 +2,10 @@ module notify
 
 go 1.18
 
+replace (
+	github.com/miekg/dns => ../../dns
+)
+
 require (
 	github.com/miekg/dns v1.1.51
 	github.com/spf13/cobra v1.6.1
