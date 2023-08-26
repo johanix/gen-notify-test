@@ -1,8 +1,7 @@
-module notify
+module ddns-cli
 
-go 1.18
+go 1.19
 
-//	github.com/miekg/dns => ../../dns
 replace github.com/johanix/gen-notify-test/lib => ../lib
 
 require (
