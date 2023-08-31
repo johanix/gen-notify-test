@@ -17,20 +17,57 @@ import (
 
 var zonename string
 var imr = "8.8.8.8:53"
+var pzone, childpri, parpri string
 
-var sendUpdateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Send a DDNS update to parent of zone",
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Send a DDNS update to sync parent delegation info with child data",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendUpdate(dns.Fqdn(zonename), []dns.RR{}, []dns.RR{})
+	        if lib.Zonename == "" {
+		   log.Fatalf("Error: child zone name not specified.")
+		}
+		lib.Zonename = dns.Fqdn(lib.Zonename)
+	        if pzone == "" {
+		   log.Fatalf("Error: parent zone name not specified.")
+		}
+	        if childpri == "" {
+		   log.Fatalf("Error: child primary nameserver not specified.")
+		}
+	        if parpri == "" {
+		   log.Fatalf("Error: parent primary nameserver not specified.")
+		}
+
+		ns_parent, err := lib.AuthQuery(lib.Zonename, parpri, dns.TypeNS)
+		if err != nil {
+		   log.Fatalf("Error: looking up child %s NS RRset in parent primary %s: %v",
+		   		      lib.Zonename, parpri, err)
+		}
+
+		ns_child, err := lib.AuthQuery(lib.Zonename, parpri, dns.TypeNS)
+		if err != nil {
+		   log.Fatalf("Error: looking up child %s NS RRset in child primary %s: %v",
+		   		      lib.Zonename, childpri, err)
+		}
+
+		for _, ns := range ns_parent {
+		    fmt.Printf("Parent: %s\n", ns.String())
+		}
+		for _, ns := range ns_child {
+		    fmt.Printf("Child:  %s\n", ns.String())
+		}
+
+		SendUpdate(dns.Fqdn(lib.Zonename), []dns.RR{}, []dns.RR{})
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(sendUpdateCmd)
+	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(lib.ToRFC3597Cmd)
 
-	rootCmd.PersistentFlags().StringVarP(&lib.Zonename, "zone", "z", "", "Zone to send a parent notify for")
+	rootCmd.PersistentFlags().StringVarP(&lib.Zonename, "zone", "z", "", "Child zone to sync via DDNS")
+	syncCmd.PersistentFlags().StringVarP(&pzone, "pzone", "Z", "", "Parent zone to sync via DDNS")
+	syncCmd.PersistentFlags().StringVarP(&childpri, "primary", "p", "", "Address:port of child primary namserver")
+	syncCmd.PersistentFlags().StringVarP(&parpri, "pprimary", "P", "", "Address:port of parent primary nameserver")
 }
 
 func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR) {

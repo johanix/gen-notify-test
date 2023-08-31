@@ -87,9 +87,49 @@ func NotifyQuery(z, imr string) ([]*dns.PrivateRR, error) {
 			} else if _, ok = rr.(*dns.RRSIG); ok {
 				// ignore RRSIGs for the moment
 			} else {
-				log.Fatalf("Error: answer is not an SRV RR: %s", rr.String())
+				log.Fatalf("Error: answer is not a NOTIFY RR: %s", rr.String())
 			}
 		}
 	}
 	return prrs, nil
+}
+
+func AuthQuery(qname, ns string, rrtype uint16) ([]dns.RR, error) {
+	m := new(dns.Msg)
+	m.SetQuestion(qname, rrtype)
+
+	if Global.Debug {
+		fmt.Printf("DEBUG: Query:\n%s\n", m.String())
+	}
+
+	res, err := dns.Exchange(m, ns)
+
+	if err != nil && !Global.Debug {
+		log.Fatalf("Error from dns.Exchange(%s, %s, %s): %v", qname, dns.TypeToString[rrtype], ns, err)
+	}
+
+	if res.Rcode != dns.RcodeSuccess {
+		log.Fatalf("Error: Query for %s %s received rcode: %s",
+			qname, dns.TypeToString[rrtype], dns.RcodeToString[res.Rcode])
+	}
+
+	var rrs []dns.RR
+
+	if len(res.Answer) > 0 {
+		for _, rr := range res.Answer {
+		        if rr.Header().Rrtype == rrtype {
+				if Global.Debug {
+					fmt.Printf("Looking up %s %s RRset:\n%s\n", qname, dns.TypeToString[rrtype], rr.String())
+				}
+
+				rrs = append(rrs, rr)
+
+			} else if _, ok := rr.(*dns.RRSIG); ok {
+				// ignore RRSIGs for the moment
+			} else {
+				log.Fatalf("Error: answer is not an %s RR: %s", dns.TypeToString[rrtype], rr.String())
+			}
+		}
+	}
+	return rrs, nil
 }
