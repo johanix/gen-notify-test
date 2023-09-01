@@ -146,10 +146,12 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 func AnalyseUpdate(zone string, r *dns.Msg, verbose, debug bool) {
 	for i := 0; i <= len(r.Ns)-1; i++ {
-		m := r.Ns[i]
-		log.Printf("DnsEngine: Processing update[%d]: %s %s", i, zone, m.String())
-		if verbose {
-			log.Printf("DnsEngine: Received UPDATE for RR: %s", m.String())
+		rr := r.Ns[i]
+		
+		if rr.Header().Class == dns.ClassNONE {
+		   log.Printf("AnalyseUpdate: Remove RR[%d]: %s", i, rr.String())
+		} else {
+		   log.Printf("AnalyseUpdate: Add RR[%d]: %s", i, rr.String())
 		}
 	}
 	return

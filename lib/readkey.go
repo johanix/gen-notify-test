@@ -102,7 +102,7 @@ func init() {
 
 func sigLifetime(t time.Time) (uint32, uint32) {
 	sigJitter := time.Duration(60 * time.Second)
-	sigValidityInterval := time.Duration(1 * time.Hour)
+	sigValidityInterval := time.Duration(5 * time.Minute)
 	incep := uint32(t.Add(-sigJitter).Unix())
 	expir := uint32(t.Add(sigValidityInterval).Add(sigJitter).Unix())
 	return incep, expir
