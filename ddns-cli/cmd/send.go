@@ -4,6 +4,7 @@
 package cmd
 
 import (
+        "crypto"
 	"fmt"
 	"log"
 	"net"
@@ -40,6 +41,25 @@ var syncCmd = &cobra.Command{
 		   log.Fatalf("Error: parent primary nameserver not specified.")
 		}
 
+		var keyrr *dns.KEY
+		var cs crypto.Signer
+		var rr dns.RR
+
+	        if keyfile != "" {
+		   var ktype string
+		   var err error
+		   _, cs, rr, ktype, err = lib.ReadKey(keyfile)
+		   if err != nil {
+		      log.Fatalf("Error reading key '%s': %v", keyfile, err)
+		   }
+
+		   if ktype != "KEY" {
+		      log.Fatalf("Key must be a KEY RR")
+		   }
+
+		   keyrr = rr.(*dns.KEY)
+		}	
+
 		ns_parent, err := lib.AuthQuery(lib.Zonename, parpri, dns.TypeNS)
 		if err != nil {
 		   log.Fatalf("Error: looking up child %s NS RRset in parent primary %s: %v",
@@ -65,7 +85,7 @@ var syncCmd = &cobra.Command{
 
 		differ, adds, removes := lib.RRsetDiffer(lib.Zonename, ns_child, ns_parent, dns.TypeNS, log.Default())
 		if differ {
-		   fmt.Printf("Parent and child NS RRsets differ:\n")
+		   fmt.Printf("Parent and child NS RRsets differ. To get parent in sync:\n")
 		   for _, rr := range removes {
 		       fmt.Printf("Remove: %s\n", rr.String())
 		   }
@@ -80,7 +100,22 @@ var syncCmd = &cobra.Command{
 		   log.Fatalf("Error from LookupDDNSTarget(%s, %s): %v", pzone, parpri, err)
 		}
 
-		err = SendUpdate(pzone, adds, removes, dsynctarget)
+		msg, err := CreateUpdate(pzone, adds, removes)
+		if err != nil {
+		   log.Fatalf("Error from SendUpdate(%v): %v", dsynctarget, err)
+		}
+
+		if keyfile != "" {
+		   fmt.Printf("Signing update.\n")
+		   msg, err = lib.SignMsgNG(msg, lib.Zonename, cs, keyrr)
+		   if err != nil {
+		      log.Fatalf("Error from SendUpdate(%v): %v", dsynctarget, err)
+		   }
+		} else {
+		      fmt.Printf("Keyfile not specified, not signing message.\n")
+		}
+
+		err = SendUpdate(msg, pzone, dsynctarget)
 		if err != nil {
 		   log.Fatalf("Error from SendUpdate(%v): %v", dsynctarget, err)
 		}
@@ -98,8 +133,7 @@ func init() {
 	syncCmd.PersistentFlags().StringVarP(&lib.Global.IMR, "imr", "i", "", "IMR to send the query to")
 }
 
-// func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DDNSTarget) error {
-func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DSYNCTarget) error {
+func SendUpdate(msg dns.Msg, zonename string, target lib.DSYNCTarget) error {
 	if zonename == "." {
 		fmt.Printf("Error: zone name not specified. Terminating.\n")
 		os.Exit(1)
@@ -110,21 +144,12 @@ func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DSY
 			fmt.Printf("Sending DDNS update for parent zone %s to %s on address %s:%d\n", zonename, target.Name, dst, target.Port)
 		}
 
-		m := new(dns.Msg)
-		m.SetUpdate(zonename)
-
-		// remove SOA, add ntype
-		// m.Question = []dns.Question{ dns.Question{zonename, notify_type, dns.ClassINET} } 
-
-		m.Remove(removes)
-		m.Insert(adds)
-		
 		if lib.Global.Debug {
-			fmt.Printf("Sending Update:\n%s\n", m.String())
+			fmt.Printf("Sending Update:\n%s\n", msg.String())
 		}
 
 		dst = net.JoinHostPort(dst, fmt.Sprintf("%d", target.Port))
-		res, err := dns.Exchange(m, dst)
+		res, err := dns.Exchange(&msg, dst)
 		if err != nil {
 			log.Fatalf("Error from dns.Exchange(%s, UPDATE): %v", dst, err)
 		}
@@ -142,5 +167,23 @@ func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DSY
 		}
 	}
 	return nil
+}
+
+func CreateUpdate(zonename string, adds, removes []dns.RR) (dns.Msg, error) {
+	if zonename == "." {
+		fmt.Printf("Error: zone name not specified. Terminating.\n")
+		os.Exit(1)
+	}
+
+	m := new(dns.Msg)
+	m.SetUpdate(zonename)
+
+	m.Remove(removes)
+	m.Insert(adds)
+		
+	if lib.Global.Debug {
+		fmt.Printf("Creating update msg:\n%s\n", m.String())
+	}
+	return *m, nil
 }
 

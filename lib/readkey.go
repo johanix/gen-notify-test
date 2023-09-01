@@ -1,12 +1,12 @@
 /*
+ * Johan Stenstam, johani@johani.org
  */
-package cmd
+package lib
 
 import (
 	"crypto"
 	"crypto/rsa"
 	"fmt"
-	// "io"
 	"log"
 	"os"
 	"strings"
@@ -78,7 +78,7 @@ to quickly create a Cobra application.`,
 
 		m.Insert([]dns.RR{add1, add2})
 
-		m2, err := SignMsg(m, cs, keyrr)
+		m2, err := SignMsgNG(*m, "alpha.dnslab.", cs, keyrr)
 		if err != nil {
 		   log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
 		}
@@ -95,7 +95,7 @@ to quickly create a Cobra application.`,
 }
 
 func init() {
-	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
+//	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
 	readkeyCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 	signMsgCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 }
@@ -108,7 +108,7 @@ func sigLifetime(t time.Time) (uint32, uint32) {
 	return incep, expir
 }
 
-func SignMsg(m *dns.Msg, cs crypto.Signer, keyrr *dns.KEY) (*dns.Msg, error) {
+func SignMsgNG(m dns.Msg, name string, cs crypto.Signer, keyrr *dns.KEY) (dns.Msg, error) {
 
 	sigrr := new(dns.SIG)
 	sigrr.Hdr = dns.RR_Header{
@@ -120,12 +120,12 @@ func SignMsg(m *dns.Msg, cs crypto.Signer, keyrr *dns.KEY) (*dns.Msg, error) {
 	sigrr.RRSIG.KeyTag = keyrr.DNSKEY.KeyTag()
 	sigrr.RRSIG.Algorithm = keyrr.DNSKEY.Algorithm
 	sigrr.RRSIG.Inception, sigrr.RRSIG.Expiration = sigLifetime(time.Now())
-	sigrr.RRSIG.SignerName = "alpha.dnslab."
+	sigrr.RRSIG.SignerName = name
 
 	fmt.Printf("SIG pre-signing: %v\n", sigrr.String())
 	fmt.Printf("Msg additional pre-signing: %d\n", len(m.Extra))
 
-	res, err := sigrr.Sign(cs, m)
+	res, err := sigrr.Sign(cs, &m)
 	if err != nil {
 		log.Fatalf("Error from sig.Sign: %v", err)
 	}
@@ -136,7 +136,7 @@ func SignMsg(m *dns.Msg, cs crypto.Signer, keyrr *dns.KEY) (*dns.Msg, error) {
 	fmt.Printf("len(msg+sig): %d\n", m.Len())
 
 	fmt.Printf("Signed msg: %s\n", m.String())
-	fmt.Printf("Completed SIG RR: %s\n", sigrr.String())
+	// fmt.Printf("Completed SIG RR: %s\n", sigrr.String())
 
 	return m, nil
 }
@@ -220,4 +220,25 @@ func ReadKey(filename string) (crypto.PrivateKey, crypto.Signer, dns.RR, string,
 	}
 
 	return k, cs, rr, ktype, nil
+}
+
+// From Mieks DNS lib:
+const year68     = 1 << 31 // For RFC1982 (Serial Arithmetic) calculations in 32 bits.
+
+// ValidityPeriod uses RFC1982 serial arithmetic to calculate
+// if a signature period is valid. If t is the zero time, the
+// current time is taken other t is. Returns true if the signature
+// is valid at the given time, otherwise returns false.
+func SIGValidityPeriod(sig *dns.SIG, t time.Time) bool {
+	var utc int64
+	if t.IsZero() {
+		utc = time.Now().UTC().Unix()
+	} else {
+		utc = t.UTC().Unix()
+	}
+	modi := (int64(sig.Inception) - utc) / year68
+	mode := (int64(sig.Expiration) - utc) / year68
+	ti := int64(sig.Inception) + modi*year68
+	te := int64(sig.Expiration) + mode*year68
+	return ti <= utc && utc <= te
 }

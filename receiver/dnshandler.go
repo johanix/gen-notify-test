@@ -5,10 +5,14 @@
 package main
 
 import (
+        // "crypto"
 	"log"
+	"time"
 
 	"github.com/miekg/dns"
 	"github.com/spf13/viper"
+
+	lib "github.com/johanix/gen-notify-test/lib"
 )
 
 func DnsEngine(scannerq chan ScanRequest) error {
@@ -36,6 +40,29 @@ func DnsEngine(scannerq chan ScanRequest) error {
 }
 
 func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.ResponseWriter, r *dns.Msg) {
+
+		var keyrr *dns.KEY
+		// var cs crypto.Signer
+		var rr dns.RR
+
+		keyfile := "Kalpha.dnslab.+008+47989.key"
+
+	        if keyfile != "" {
+		   var ktype string
+		   var err error
+		   _, _, rr, ktype, err = lib.ReadKey(keyfile)
+		   if err != nil {
+		      log.Fatalf("Error reading key '%s': %v", keyfile, err)
+		   }
+
+		   if ktype != "KEY" {
+		      log.Fatalf("Key must be a KEY RR")
+		   }
+
+		   keyrr = rr.(*dns.KEY)
+		}	
+
+
 
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		var qtype string
@@ -68,16 +95,46 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			// send NOERROR response
 			m := new(dns.Msg)
 			m.SetReply(r)
+			rcode := dns.RcodeSuccess
+
+			if len(r.Extra) == 1 {
+			   if sig, ok := r.Extra[0].(*dns.SIG); ok {
+			      log.Printf("Update is signed.")
+			      msgbuf, err := r.Pack()
+			      if err != nil {
+			      	 log.Printf("Error from msg.Pack(): %v", err)
+				 rcode = dns.RcodeFormatError
+			      }
+			      err = sig.Verify(keyrr, msgbuf)
+			      if err != nil {
+			      	 log.Printf("Error from sig.Varify(): %v", err)
+				 rcode = dns.RcodeBadSig
+			      } else {
+			      	 log.Printf("SIG verified correctly")
+			      }
+
+			      if lib.SIGValidityPeriod(sig, time.Now()) {
+			      	 log.Printf("SIG is within its validity period")
+			      } else {
+			      	 log.Printf("SIG is NOT within its validity period")
+				 rcode = dns.RcodeBadTime
+			      }
+			   } else {
+				 rcode = dns.RcodeFormatError
+			   }
+			} else {
+				 rcode = dns.RcodeFormatError
+			}
+
+			// send response back
+			m = m.SetRcode(m, rcode)
 			w.WriteMsg(m)
 
-			for i := 0; i <= len(r.Ns)-1; i++ {
-				m := r.Ns[i]
-				// qtype = dns.TypeToString[m.Qtype]
-				log.Printf("DnsEngine: Processing update[%d]: %s %s", i, zone, m.String())
-				if verbose {
-					log.Printf("DnsEngine: Received UPDATE for RR: %s", m.String())
-				}
+			if rcode != dns.RcodeSuccess {
+			   log.Printf("Error verifying DDNS update. Ignoring contents.")
 			}
+
+			AnalyseUpdate(zone, r, verbose, debug)
 			return
 
 		default:
@@ -85,4 +142,15 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 					   dns.OpcodeToString[r.Opcode])
 		}
 	}
+}
+
+func AnalyseUpdate(zone string, r *dns.Msg, verbose, debug bool) {
+	for i := 0; i <= len(r.Ns)-1; i++ {
+		m := r.Ns[i]
+		log.Printf("DnsEngine: Processing update[%d]: %s %s", i, zone, m.String())
+		if verbose {
+			log.Printf("DnsEngine: Received UPDATE for RR: %s", m.String())
+		}
+	}
+	return
 }
