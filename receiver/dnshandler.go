@@ -64,18 +64,18 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			return
 
 		case dns.OpcodeUpdate:
-			log.Printf("Received UPDATE for zone '%s' containing %d RRs", zone, len(r.Question))
+			log.Printf("Received UPDATE for zone '%s' containing %d RRs in the update section", zone, len(r.Ns))
 			// send NOERROR response
 			m := new(dns.Msg)
 			m.SetReply(r)
 			w.WriteMsg(m)
 
-			for i := 0; i <= len(r.Question)-1; i++ {
-				m := r.Question[i]
-				qtype = dns.TypeToString[m.Qtype]
-				log.Printf("DnsEngine: Processing Question[%d]: %s %s", i, zone, qtype)
+			for i := 0; i <= len(r.Ns)-1; i++ {
+				m := r.Ns[i]
+				// qtype = dns.TypeToString[m.Qtype]
+				log.Printf("DnsEngine: Processing update[%d]: %s %s", i, zone, m.String())
 				if verbose {
-					log.Printf("DnsEngine: Received UPDATE for delegation %s", qtype, m.Name)
+					log.Printf("DnsEngine: Received UPDATE for RR: %s", m.String())
 				}
 			}
 			return

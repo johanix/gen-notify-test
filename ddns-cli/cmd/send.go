@@ -80,7 +80,7 @@ var syncCmd = &cobra.Command{
 		   log.Fatalf("Error from LookupDDNSTarget(%s, %s): %v", pzone, parpri, err)
 		}
 
-		err = SendUpdate(lib.Zonename, adds, removes, dsynctarget)
+		err = SendUpdate(pzone, adds, removes, dsynctarget)
 		if err != nil {
 		   log.Fatalf("Error from SendUpdate(%v): %v", dsynctarget, err)
 		}
@@ -100,7 +100,6 @@ func init() {
 
 // func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DDNSTarget) error {
 func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DSYNCTarget) error {
-        var lookupzone string
 	if zonename == "." {
 		fmt.Printf("Error: zone name not specified. Terminating.\n")
 		os.Exit(1)
@@ -108,15 +107,18 @@ func SendUpdate(zonename string, adds []dns.RR, removes []dns.RR, target lib.DSY
 
 	for _, dst := range target.Addresses {
 		if lib.Global.Verbose {
-			fmt.Printf("Sending DDNS update to %s on address %s:%d\n", target.Name, dst, target.Port)
+			fmt.Printf("Sending DDNS update for parent zone %s to %s on address %s:%d\n", zonename, target.Name, dst, target.Port)
 		}
 
 		m := new(dns.Msg)
-		m.SetUpdate(lookupzone)
+		m.SetUpdate(zonename)
 
 		// remove SOA, add ntype
 		// m.Question = []dns.Question{ dns.Question{zonename, notify_type, dns.ClassINET} } 
 
+		m.Remove(removes)
+		m.Insert(adds)
+		
 		if lib.Global.Debug {
 			fmt.Printf("Sending Update:\n%s\n", m.String())
 		}
