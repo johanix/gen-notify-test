@@ -6,6 +6,7 @@ package lib
 import (
 	"crypto"
 	"crypto/rsa"
+	"crypto/ed25519"
 	"fmt"
 	"log"
 	"os"
@@ -47,17 +48,17 @@ var signMsgCmd = &cobra.Command{
 and usage of using your command. For example:
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-	     	if filename == "" {
-		   log.Fatalf("Error: filename with key not specified")
+		if filename == "" {
+			log.Fatalf("Error: filename with key not specified")
 		}
 
 		_, cs, rr, ktype, err := ReadKey(filename)
 		if err != nil {
-		   log.Fatalf("Error reading key '%s': %v", filename, err)
+			log.Fatalf("Error reading key '%s': %v", filename, err)
 		}
 
 		if ktype != "KEY" {
-		   log.Fatalf("Key must be a KEY RR")
+			log.Fatalf("Key must be a KEY RR")
 		}
 
 		keyrr := rr.(*dns.KEY)
@@ -67,27 +68,27 @@ to quickly create a Cobra application.`,
 		addstr := "alpha.dnslab. 60 IN NS ns.alpha.dnslab."
 		add1, err := dns.NewRR(addstr)
 		if err != nil {
-		   log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
+			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
 		}
 
 		addstr = "alpha.dnslab. 60 IN NS nsgo.alpha.dnslab."
 		add2, err := dns.NewRR(addstr)
 		if err != nil {
-		   log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
+			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
 		}
 
 		m.Insert([]dns.RR{add1, add2})
 
 		m2, err := SignMsgNG(*m, "alpha.dnslab.", cs, keyrr)
 		if err != nil {
-		   log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
+			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
 		}
 
 		fmt.Printf("M2: %s\n", m2.String())
 
 		res2, err := dns.Exchange(m, "127.0.0.1:5310")
 		if err != nil {
-		   log.Fatalf("Error from dns.Exchange(): %v", err)
+			log.Fatalf("Error from dns.Exchange(): %v", err)
 		}
 		fmt.Printf("Response from parent: %s\n", res2.String())
 
@@ -95,7 +96,7 @@ to quickly create a Cobra application.`,
 }
 
 func init() {
-//	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
+	//	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
 	readkeyCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 	signMsgCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 }
@@ -215,6 +216,10 @@ func ReadKey(filename string) (crypto.PrivateKey, crypto.Signer, dns.RR, string,
 	switch alg {
 	case dns.RSASHA256:
 		cs = k.(*rsa.PrivateKey)
+	case dns.ED25519:
+		cs = k.(*ed25519.PrivateKey)
+//	case dns.RSASHA256:
+//		cs = k.(*rsa.PrivateKey)
 	default:
 		log.Fatalf("Error: no support for algorithm %s yet", dns.AlgorithmToString[alg])
 	}
@@ -222,8 +227,65 @@ func ReadKey(filename string) (crypto.PrivateKey, crypto.Signer, dns.RR, string,
 	return k, cs, rr, ktype, nil
 }
 
+func ReadPubKeys(keydir string) (map[string]dns.KEY, error) {
+
+	var keymap = make(map[string]dns.KEY, 5)
+
+	if keydir == "" {
+		log.Fatalf("Error: key directory not specified in YAML config")
+	}
+
+	entries, err := os.ReadDir(keydir)
+	if err != nil {
+		log.Fatalf("Error from os.ReadDir(%s): %v", keydir, err)
+	}
+
+	for _, f := range entries {
+		fname := f.Name()
+		fmt.Println(fname)
+
+		if strings.HasSuffix(fname, ".key") {
+			// basename = strings.TrimSuffix(filename, ".key")
+			pubfile := keydir + "/" + fname
+			_, err := os.Open(pubfile)
+			if err != nil {
+				log.Fatalf("Error opening public key file '%s': %v",
+					pubfile, err)
+			}
+			pubkeybytes, err := os.ReadFile(pubfile)
+			if err != nil {
+				log.Fatalf("Error reading public key file '%s': %v",
+					pubfile, err)
+			}
+			pubkey := string(pubkeybytes)
+			rr, err := dns.NewRR(pubkey)
+			if err != nil {
+				log.Fatalf("Error reading public key '%s': %v",
+					pubkey, err)
+			}
+
+			switch rr.(type) {
+			case *dns.KEY:
+				rrk := rr.(*dns.KEY)
+				keymap[rr.Header().Name] = *rrk
+				//		k, err = rrk.ReadPrivateKey(file, "/allan/tar/kakan")
+				//		ktype = "KEY"
+				//		alg = rrk.Algorithm
+				//		fmt.Printf("PubKey is a %s\n", dns.AlgorithmToString[rrk.Algorithm])
+			default:
+				log.Fatalf("Error: rr is of type %v", "foo")
+			}
+
+		} else {
+			fmt.Printf("File %s is not a public key file. Ignored.\n", fname)
+		}
+	}
+
+	return keymap, nil
+}
+
 // From Mieks DNS lib:
-const year68     = 1 << 31 // For RFC1982 (Serial Arithmetic) calculations in 32 bits.
+const year68 = 1 << 31 // For RFC1982 (Serial Arithmetic) calculations in 32 bits.
 
 // ValidityPeriod uses RFC1982 serial arithmetic to calculate
 // if a signature period is valid. If t is the zero time, the

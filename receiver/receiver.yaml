@@ -3,5 +3,8 @@ dnsengine:
    verbose:	true
    debug:	true
 
+ddns:
+   keydirectory:	/tmp/keys
+
 scanner:
    interval:	60

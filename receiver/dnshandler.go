@@ -5,7 +5,7 @@
 package main
 
 import (
-        // "crypto"
+	// "crypto"
 	"log"
 	"time"
 
@@ -41,28 +41,31 @@ func DnsEngine(scannerq chan ScanRequest) error {
 
 func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.ResponseWriter, r *dns.Msg) {
 
-		var keyrr *dns.KEY
-		// var cs crypto.Signer
-		var rr dns.RR
+	// var keyrr *dns.KEY
+	// var cs crypto.Signer
+	//		var rr dns.RR
 
-		keyfile := "Kalpha.dnslab.+008+47989.key"
-
-	        if keyfile != "" {
-		   var ktype string
-		   var err error
-		   _, _, rr, ktype, err = lib.ReadKey(keyfile)
-		   if err != nil {
-		      log.Fatalf("Error reading key '%s': %v", keyfile, err)
-		   }
-
-		   if ktype != "KEY" {
-		      log.Fatalf("Key must be a KEY RR")
-		   }
-
-		   keyrr = rr.(*dns.KEY)
-		}	
-
-
+	//		keyfile := "Kalpha.dnslab.+008+47989.key"
+	//
+	//	        if keyfile != "" {
+	//		   var ktype string
+	//		   var err error
+	//		   _, _, rr, ktype, err = lib.ReadKey(keyfile)
+	//		   if err != nil {
+	//		      log.Fatalf("Error reading key '%s': %v", keyfile, err)
+	//		   }
+	//
+	//		   if ktype != "KEY" {
+	//		      log.Fatalf("Key must be a KEY RR")
+	//		   }
+	//
+	//		   keyrr = rr.(*dns.KEY)
+	//		}
+	keydir := viper.GetString("ddns.keydirectory")
+	keymap, err := lib.ReadPubKeys(keydir)
+	if err != nil {
+		log.Fatalf("Error from ReadPublicKeys(%s): %v", keydir, err)
+	}
 
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		var qtype string
@@ -98,32 +101,39 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			rcode := dns.RcodeSuccess
 
 			if len(r.Extra) == 1 {
-			   if sig, ok := r.Extra[0].(*dns.SIG); ok {
-			      log.Printf("Update is signed.")
-			      msgbuf, err := r.Pack()
-			      if err != nil {
-			      	 log.Printf("Error from msg.Pack(): %v", err)
-				 rcode = dns.RcodeFormatError
-			      }
-			      err = sig.Verify(keyrr, msgbuf)
-			      if err != nil {
-			      	 log.Printf("Error from sig.Varify(): %v", err)
-				 rcode = dns.RcodeBadSig
-			      } else {
-			      	 log.Printf("SIG verified correctly")
-			      }
+				if sig, ok := r.Extra[0].(*dns.SIG); ok {
+					log.Printf("Update is signed by \"%s\".", sig.RRSIG.SignerName)
+					msgbuf, err := r.Pack()
+					if err != nil {
+						log.Printf("Error from msg.Pack(): %v", err)
+						rcode = dns.RcodeFormatError
+					}
 
-			      if lib.SIGValidityPeriod(sig, time.Now()) {
-			      	 log.Printf("SIG is within its validity period")
-			      } else {
-			      	 log.Printf("SIG is NOT within its validity period")
-				 rcode = dns.RcodeBadTime
-			      }
-			   } else {
-				 rcode = dns.RcodeFormatError
-			   }
+					keyrr, ok := keymap[sig.RRSIG.SignerName]
+					if !ok {
+						log.Printf("Error: key \"\" is unknown.", sig.RRSIG.SignerName)
+						rcode = dns.RcodeBadKey
+					}
+
+					err = sig.Verify(&keyrr, msgbuf)
+					if err != nil {
+						log.Printf("Error from sig.Varify(): %v", err)
+						rcode = dns.RcodeBadSig
+					} else {
+						log.Printf("SIG verified correctly")
+					}
+
+					if lib.SIGValidityPeriod(sig, time.Now()) {
+						log.Printf("SIG is within its validity period")
+					} else {
+						log.Printf("SIG is NOT within its validity period")
+						rcode = dns.RcodeBadTime
+					}
+				} else {
+					rcode = dns.RcodeFormatError
+				}
 			} else {
-				 rcode = dns.RcodeFormatError
+				rcode = dns.RcodeFormatError
 			}
 
 			// send response back
@@ -131,7 +141,7 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			w.WriteMsg(m)
 
 			if rcode != dns.RcodeSuccess {
-			   log.Printf("Error verifying DDNS update. Ignoring contents.")
+				log.Printf("Error verifying DDNS update. Ignoring contents.")
 			}
 
 			AnalyseUpdate(zone, r, verbose, debug)
@@ -139,7 +149,7 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 		default:
 			log.Printf("Error: unable to handle msgs of type %s",
-					   dns.OpcodeToString[r.Opcode])
+				dns.OpcodeToString[r.Opcode])
 		}
 	}
 }
@@ -147,11 +157,11 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 func AnalyseUpdate(zone string, r *dns.Msg, verbose, debug bool) {
 	for i := 0; i <= len(r.Ns)-1; i++ {
 		rr := r.Ns[i]
-		
+
 		if rr.Header().Class == dns.ClassNONE {
-		   log.Printf("AnalyseUpdate: Remove RR[%d]: %s", i, rr.String())
+			log.Printf("AnalyseUpdate: Remove RR[%d]: %s", i, rr.String())
 		} else {
-		   log.Printf("AnalyseUpdate: Add RR[%d]: %s", i, rr.String())
+			log.Printf("AnalyseUpdate: Add RR[%d]: %s", i, rr.String())
 		}
 	}
 	return
