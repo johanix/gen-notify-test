@@ -34,6 +34,10 @@ func DnsEngine(scannerq chan ScanRequest) error {
 			go func(addr, net string) {
 				log.Printf("DnsEngine: serving on %s (%s)\n", addr, net)
 				server := &dns.Server{Addr: addr, Net: net}
+
+				// Must bump the buffer size of incoming UDP msgs, as updates
+				// may be much larger then queries
+				server.UDPSize = dns.DefaultMsgSize // 4096
 				if err := server.ListenAndServe(); err != nil {
 					log.Printf("Failed to setup the %s server: %s\n", net, err.Error())
 				} else {
