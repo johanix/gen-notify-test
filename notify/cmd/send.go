@@ -58,7 +58,6 @@ var sendSoaCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(sendCmd)
 	sendCmd.AddCommand(sendCdsCmd, sendCsyncCmd, sendDnskeyCmd, sendSoaCmd)
-	rootCmd.AddCommand(lib.ToRFC3597Cmd)
 
 	sendCmd.PersistentFlags().StringVarP(&lib.Zonename, "zone", "z", "", "Zone to send a parent notify for")
 	sendCmd.PersistentFlags().StringVarP(&pzone, "pzone", "Z", "", "Parent zone to sync via DDNS")

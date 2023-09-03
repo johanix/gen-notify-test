@@ -1,5 +1,5 @@
 /*
- * (c) Johan Stenstam, johani@johani.org
+ * Johan Stenstam, johani@johani.org
  */
 
 package main
@@ -7,6 +7,7 @@ package main
 import (
 	// "crypto"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -14,6 +15,11 @@ import (
 
 	lib "github.com/johanix/gen-notify-test/lib"
 )
+
+type UpdatePolicy struct {
+     Type	  string // only "selfsub" known at the moment
+     RRtypes	  map[uint16]bool
+}
 
 func DnsEngine(scannerq chan ScanRequest) error {
 	addresses := viper.GetStringSlice("dnsengine.addresses")
@@ -41,31 +47,38 @@ func DnsEngine(scannerq chan ScanRequest) error {
 
 func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.ResponseWriter, r *dns.Msg) {
 
-	// var keyrr *dns.KEY
-	// var cs crypto.Signer
-	//		var rr dns.RR
-
-	//		keyfile := "Kalpha.dnslab.+008+47989.key"
-	//
-	//	        if keyfile != "" {
-	//		   var ktype string
-	//		   var err error
-	//		   _, _, rr, ktype, err = lib.ReadKey(keyfile)
-	//		   if err != nil {
-	//		      log.Fatalf("Error reading key '%s': %v", keyfile, err)
-	//		   }
-	//
-	//		   if ktype != "KEY" {
-	//		      log.Fatalf("Key must be a KEY RR")
-	//		   }
-	//
-	//		   keyrr = rr.(*dns.KEY)
-	//		}
 	keydir := viper.GetString("ddns.keydirectory")
 	keymap, err := lib.ReadPubKeys(keydir)
 	if err != nil {
 		log.Fatalf("Error from ReadPublicKeys(%s): %v", keydir, err)
 	}
+
+	policy := UpdatePolicy{
+			Type:		viper.GetString("ddns.policy.type"),
+			RRtypes:	map[uint16]bool{},
+		  }
+
+	switch policy.Type {
+	case "selfsub", "self":
+	     // all ok, we know these
+	default:
+	   log.Fatalf("Error: unknown update policy type: \"%s\". Terminating.", policy.Type)
+	}
+		  
+	var rrtypes []string
+	for _, rrstr := range viper.GetStringSlice("ddns.policy.rrtypes") {
+	    if rrt, ok := dns.StringToType[rrstr]; ok {
+	       policy.RRtypes[rrt] = true
+	       rrtypes = append(rrtypes, rrstr)
+	    } else {
+	      log.Printf("Unknown RR type: \"%s\". Ignoring.", rrstr)
+	    }
+	}
+
+	if len(policy.RRtypes) == 0 {
+	   log.Fatalf("Error: zero valid RRtypes listed in policy.")
+	}
+	log.Printf("DnsEngine: using update policy \"%s\" with RRtypes: %v", policy.Type, rrtypes)
 
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		var qtype string
@@ -76,7 +89,6 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 		switch r.Opcode {
 		case dns.OpcodeNotify:
-			// log.Printf("Received NOTIFY for zone '%s' containing %d RRs", zone, len(r.Question))
 			// send NOERROR response
 			m := new(dns.Msg)
 			m.SetReply(r)
@@ -85,7 +97,6 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			for i := 0; i <= len(r.Question)-1; i++ {
 				m := r.Question[i]
 				qtype = dns.TypeToString[m.Qtype]
-				// log.Printf("DnsEngine: Processing Question[%d]: %s %s", i, zone, qtype)
 				if verbose {
 					log.Printf("DnsEngine: Received NOTIFY(%s) for zone %s", qtype, zone)
 				}
@@ -95,56 +106,35 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 
 		case dns.OpcodeUpdate:
 			log.Printf("Received UPDATE for zone '%s' containing %d RRs in the update section", zone, len(r.Ns))
-			// send NOERROR response
+
 			m := new(dns.Msg)
 			m.SetReply(r)
-			rcode := dns.RcodeSuccess
 
-			if len(r.Extra) == 1 {
-				if sig, ok := r.Extra[0].(*dns.SIG); ok {
-					log.Printf("Update is signed by \"%s\".", sig.RRSIG.SignerName)
-					msgbuf, err := r.Pack()
-					if err != nil {
-						log.Printf("Error from msg.Pack(): %v", err)
-						rcode = dns.RcodeFormatError
-					}
-
-					keyrr, ok := keymap[sig.RRSIG.SignerName]
-					if !ok {
-						log.Printf("Error: key \"\" is unknown.", sig.RRSIG.SignerName)
-						rcode = dns.RcodeBadKey
-					}
-
-					err = sig.Verify(&keyrr, msgbuf)
-					if err != nil {
-						log.Printf("Error from sig.Varify(): %v", err)
-						rcode = dns.RcodeBadSig
-					} else {
-						log.Printf("SIG verified correctly")
-					}
-
-					if lib.SIGValidityPeriod(sig, time.Now()) {
-						log.Printf("SIG is within its validity period")
-					} else {
-						log.Printf("SIG is NOT within its validity period")
-						rcode = dns.RcodeBadTime
-					}
-				} else {
-					rcode = dns.RcodeFormatError
-				}
-			} else {
-				rcode = dns.RcodeFormatError
+			rcode, signername, err := ValidateUpdate(r, keymap)
+			if err != nil {
+				log.Printf("Eror from ValidateUpdate(): %v", err)
 			}
 
-			// send response back
-			m = m.SetRcode(m, rcode)
+			// send response
+			m = m.SetRcode(m, int(rcode))
 			w.WriteMsg(m)
 
 			if rcode != dns.RcodeSuccess {
 				log.Printf("Error verifying DDNS update. Ignoring contents.")
 			}
 
-			AnalyseUpdate(zone, r, verbose, debug)
+			ok, err := ApproveUpdate(zone, signername, r, policy, verbose, debug)
+			if err != nil {
+				log.Printf("Error from ApproveUpdate: %v. Ignoring update.", err)
+				return
+			}
+
+			if !ok {
+			   log.Printf("ApproveUpdate rejected the update. Ignored.")
+			   return
+			}
+			log.Printf("Update validated and approved. Queued for zone update.")
+			// send into suitable channel for pending updates
 			return
 
 		default:
@@ -154,15 +144,87 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 	}
 }
 
-func AnalyseUpdate(zone string, r *dns.Msg, verbose, debug bool) {
+func ValidateUpdate(r *dns.Msg, keymap map[string]dns.KEY) (uint8, string, error) {
+	var rcode uint8 = dns.RcodeSuccess
+
+	if len(r.Extra) == 0 {
+	   return dns.RcodeFormatError, "", nil // there is no signature on the update
+	}
+
+	if _, ok := r.Extra[0].(*dns.SIG); !ok {
+	   return dns.RcodeFormatError, "", nil // there is no SIG(0) signature on the update
+	}
+
+	sig := r.Extra[0].(*dns.SIG)
+	log.Printf("Update is signed by \"%s\".", sig.RRSIG.SignerName)
+	msgbuf, err := r.Pack()
+	if err != nil {
+		log.Printf("Error from msg.Pack(): %v", err)
+		rcode = dns.RcodeFormatError
+	}
+
+	keyrr, ok := keymap[sig.RRSIG.SignerName]
+	if !ok {
+		log.Printf("Error: key \"\" is unknown.", sig.RRSIG.SignerName)
+		rcode = dns.RcodeBadKey
+	}
+
+	err = sig.Verify(&keyrr, msgbuf)
+	if err != nil {
+		log.Printf("Error from sig.Varify(): %v", err)
+		rcode = dns.RcodeBadSig
+	} else {
+		log.Printf("SIG verified correctly")
+	}
+
+	if lib.SIGValidityPeriod(sig, time.Now()) {
+		log.Printf("SIG is within its validity period")
+	} else {
+		log.Printf("SIG is NOT within its validity period")
+		rcode = dns.RcodeBadTime
+	}
+	return rcode, sig.RRSIG.SignerName, nil
+}
+
+func ApproveUpdate(zone, signername string, r *dns.Msg, policy UpdatePolicy, verbose, debug bool) (bool, error) {
+     log.Printf("Analysing update using policy type %s with allowed RR types %v",
+     			   policy.Type, policy.RRtypes)
+
 	for i := 0; i <= len(r.Ns)-1; i++ {
 		rr := r.Ns[i]
 
+		if !policy.RRtypes[rr.Header().Rrtype] {
+		   log.Printf("ApproveUpdate: update rejected (unapproved RR type: %s)",
+		   			      dns.TypeToString[rr.Header().Rrtype])
+		   return false, nil
+		}
+
+		switch policy.Type {
+		case "selfsub":
+		     if !strings.HasSuffix(rr.Header().Name, signername) {
+		     	log.Printf("ApproveUpdate: update rejected (owner name %s outside selfsub %s tree)",
+		   			      rr.Header().Name, signername)
+		        return false, nil
+		     }
+
+		case "self":
+		     if rr.Header().Name != signername {
+		     	log.Printf("ApproveUpdate: update rejected (owner name %s different from signer name %s in violation of \"self\" policy)",
+		   			      rr.Header().Name, signername)
+		        return false, nil
+		     }
+		default:
+			log.Printf("ApproveUpdate: unknown policy type: \"%s\"", policy.Type)
+		        return false, nil
+		}
+
 		if rr.Header().Class == dns.ClassNONE {
-			log.Printf("AnalyseUpdate: Remove RR[%d]: %s", i, rr.String())
+			log.Printf("ApproveUpdate: Remove RR: %s", rr.String())
+		} else if rr.Header().Class == dns.ClassANY {
+			log.Printf("ApproveUpdate: Remove RRset: %s", rr.String())
 		} else {
-			log.Printf("AnalyseUpdate: Add RR[%d]: %s", i, rr.String())
+			log.Printf("ApproveUpdate: Add RR: %s", rr.String())
 		}
 	}
-	return
+	return true, nil
 }

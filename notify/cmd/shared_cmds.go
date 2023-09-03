@@ -9,5 +9,6 @@ import (
 
 func init() {
 	rootCmd.AddCommand(lib.QueryCmd)
+	rootCmd.AddCommand(lib.ToRFC3597Cmd)
 }
 
