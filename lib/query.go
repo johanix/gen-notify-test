@@ -13,16 +13,16 @@ import (
 )
 
 type Globals struct {
-     IMR     string
-     Verbose bool
-     Debug   bool
+	IMR     string
+	Verbose bool
+	Debug   bool
 }
 
 var Global = Globals{
-		IMR:		"8.8.8.8:53",
-		Verbose:	false,
-		Debug:		false,
-    	   }
+	IMR:     "8.8.8.8:53",
+	Verbose: false,
+	Debug:   false,
+}
 
 var Zonename string
 
@@ -47,7 +47,7 @@ var QueryCmd = &cobra.Command{
 }
 
 func init() {
-//	rootCmd.AddCommand(queryCmd)
+	//	rootCmd.AddCommand(queryCmd)
 	QueryCmd.PersistentFlags().StringVarP(&Zonename, "zone", "z", "", "Zone to query for the NOTIFY RRset in")
 	QueryCmd.PersistentFlags().StringVarP(&Global.IMR, "imr", "i", "", "IMR to send the query to")
 }
@@ -74,7 +74,7 @@ func NotifyQuery(z, imr string) ([]*dns.PrivateRR, error) {
 	}
 
 	if res == nil {
-	   return prrs, fmt.Errorf("Error: nil response to NOTIFY query")
+		return prrs, fmt.Errorf("Error: nil response to NOTIFY query")
 	}
 
 	if res.Rcode != dns.RcodeSuccess {
@@ -112,8 +112,9 @@ func AuthQuery(qname, ns string, rrtype uint16) ([]dns.RR, error) {
 	m.SetQuestion(qname, rrtype)
 
 	if Global.Debug {
-		fmt.Printf("DEBUG: Query:\n%s\n", m.String())
-		fmt.Printf("Sending query to nameserver %s\n", ns)
+		// fmt.Printf("DEBUG: Query:\n%s\n", m.String())
+		fmt.Printf("Sending query %s %s to nameserver %s\n", qname,
+				    dns.TypeToString[rrtype], ns)
 	}
 
 	res, err := dns.Exchange(m, ns)
@@ -130,11 +131,11 @@ func AuthQuery(qname, ns string, rrtype uint16) ([]dns.RR, error) {
 	var rrs []dns.RR
 
 	if len(res.Answer) > 0 {
-	   if Global.Debug {
-		fmt.Printf("Looking up %s %s RRset:\n", qname, dns.TypeToString[rrtype])
-	   }
+		if Global.Debug {
+			fmt.Printf("Looking up %s %s RRset:\n", qname, dns.TypeToString[rrtype])
+		}
 		for _, rr := range res.Answer {
-		        if rr.Header().Rrtype == rrtype {
+			if rr.Header().Rrtype == rrtype {
 				if Global.Debug {
 					fmt.Printf("%s\n", rr.String())
 				}
@@ -151,11 +152,11 @@ func AuthQuery(qname, ns string, rrtype uint16) ([]dns.RR, error) {
 	}
 
 	if len(res.Ns) > 0 {
-	   if Global.Debug {
-		fmt.Printf("Looking up %s %s RRset:\n", qname, dns.TypeToString[rrtype])
-	   }
+		if Global.Debug {
+			fmt.Printf("Looking up %s %s RRset:\n", qname, dns.TypeToString[rrtype])
+		}
 		for _, rr := range res.Ns {
-		        if rr.Header().Rrtype == rrtype {
+			if rr.Header().Rrtype == rrtype && rr.Header().Name == qname {
 				if Global.Debug {
 					fmt.Printf("%s\n", rr.String())
 				}
@@ -165,11 +166,37 @@ func AuthQuery(qname, ns string, rrtype uint16) ([]dns.RR, error) {
 			} else if _, ok := rr.(*dns.RRSIG); ok {
 				// ignore RRSIGs for the moment
 			} else {
-				log.Fatalf("Error: answer is not an %s RR: %s", dns.TypeToString[rrtype], rr.String())
+			        // Should not be fatal. Happens when querying parent for glue
+				// log.Fatalf("Error: answer is not an %s RR: %s", dns.TypeToString[rrtype], rr.String())
+			}
+		}
+		if len(rrs) > 0 { // found something
+		   return rrs, nil
+		}
+	}
+
+	if len(res.Extra) > 0 {
+		if Global.Debug {
+			fmt.Printf("Looking up %s %s RRset:\n", qname, dns.TypeToString[rrtype])
+		}
+		for _, rr := range res.Extra {
+			if rr.Header().Rrtype == rrtype && rr.Header().Name == qname {
+				if Global.Debug {
+					fmt.Printf("%s\n", rr.String())
+				}
+
+				rrs = append(rrs, rr)
+
+			} else if _, ok := rr.(*dns.RRSIG); ok {
+				// ignore RRSIGs for the moment
+			} else {
+			        // Should not be fatal.
+				// log.Fatalf("Error: answer is not an %s RR: %s", dns.TypeToString[rrtype], rr.String())
 			}
 		}
 		return rrs, nil
 	}
+
 	return rrs, nil
 }
 
@@ -231,25 +258,25 @@ func RRsetDiffer(zone string, newrrs, oldrrs []dns.RR, rrtype uint16, lg *log.Lo
 }
 
 type DDNSTarget struct {
-     Name	string
-     Addresses	[]string
-     Port	uint16
+	Name      string
+	Addresses []string
+	Port      uint16
 }
 
 type DSYNCTarget struct {
-     Name	string
-     Addresses	[]string
-     Port	uint16
+	Name      string
+	Addresses []string
+	Port      uint16
 }
 
 func LookupDDNSTarget(parentzone, parentprimary string) (DDNSTarget, error) {
-     	var addrs []string
+	var addrs []string
 	var ddnstarget DDNSTarget
-//	lookupzone = lib.ParentZone(zonename, lib.Global.IMR)
-	
+	//	lookupzone = lib.ParentZone(zonename, lib.Global.IMR)
+
 	prrs, err := NotifyQuery(parentzone, parentprimary)
 	if err != nil {
-	   return ddnstarget, err
+		return ddnstarget, err
 	}
 
 	const update_scheme = 2
@@ -276,7 +303,7 @@ func LookupDDNSTarget(parentzone, parentprimary string) (DDNSTarget, error) {
 
 	if Global.Verbose {
 		fmt.Printf("Looked up published DDNS update target for zone %s:\n\n%s\n\n",
-				   parentzone, dsync_rr.String())
+			parentzone, dsync_rr.String())
 	}
 
 	addrs, err = net.LookupHost(dsync.Dest)
@@ -285,7 +312,7 @@ func LookupDDNSTarget(parentzone, parentprimary string) (DDNSTarget, error) {
 	}
 
 	if Global.Verbose {
-	   fmt.Printf("%s has the IP addresses: %v\n", dsync.Dest, addrs)
+		fmt.Printf("%s has the IP addresses: %v\n", dsync.Dest, addrs)
 	}
 	ddnstarget.Port = dsync.Port
 	ddnstarget.Addresses = addrs
@@ -295,12 +322,12 @@ func LookupDDNSTarget(parentzone, parentprimary string) (DDNSTarget, error) {
 }
 
 func LookupDSYNCTarget(parentzone, parentprimary string, dtype uint16, scheme uint8) (DSYNCTarget, error) {
-     	var addrs []string
+	var addrs []string
 	var dsynctarget DSYNCTarget
-	
+
 	prrs, err := NotifyQuery(parentzone, parentprimary)
 	if err != nil {
-	   return dsynctarget, err
+		return dsynctarget, err
 	}
 
 	if Global.Debug {
@@ -311,7 +338,7 @@ func LookupDSYNCTarget(parentzone, parentprimary string, dtype uint16, scheme ui
 	var dsync *NOTIFY
 
 	for _, rr := range prrs {
-	        dsyncrr := rr.Data.(*NOTIFY)
+		dsyncrr := rr.Data.(*NOTIFY)
 		if dsyncrr.Scheme == scheme && dsyncrr.Type == dtype {
 			found = true
 			dsync = dsyncrr
@@ -320,12 +347,12 @@ func LookupDSYNCTarget(parentzone, parentprimary string, dtype uint16, scheme ui
 	}
 	if !found {
 		return dsynctarget, fmt.Errorf("No DSYNC type %s scheme %d destination found for for zone %s",
-		       		    		   dns.TypeToString, scheme, parentzone)
+			dns.TypeToString, scheme, parentzone)
 	}
 
 	if Global.Verbose {
 		fmt.Printf("Looked up published DSYNC update target for zone %s:\n\n%s\tIN\tNOTIFY\t%s\n\n",
-				   parentzone, parentzone,  dsync.String())
+			parentzone, parentzone, dsync.String())
 	}
 
 	addrs, err = net.LookupHost(dsync.Dest)
@@ -334,7 +361,7 @@ func LookupDSYNCTarget(parentzone, parentprimary string, dtype uint16, scheme ui
 	}
 
 	if Global.Verbose {
-	   fmt.Printf("%s has the IP addresses: %v\n", dsync.Dest, addrs)
+		fmt.Printf("%s has the IP addresses: %v\n", dsync.Dest, addrs)
 	}
 	dsynctarget.Port = dsync.Port
 	dsynctarget.Addresses = addrs
@@ -342,4 +369,3 @@ func LookupDSYNCTarget(parentzone, parentprimary string, dtype uint16, scheme ui
 
 	return dsynctarget, nil
 }
-

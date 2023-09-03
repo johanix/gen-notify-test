@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	lib "github.com/johanix/gen-notify-test/lib"
 )
 
@@ -29,6 +30,7 @@ func Execute() {
 }
 
 func init() {
+        cobra.OnInitialize(initConfig)
         err := lib.RegisterNotifyRR()
 	if err != nil {
 	   log.Fatalf("Error: %v", err)
@@ -38,3 +40,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&keyfile, "keyfile", "k", "", "name of file with private SIG(0) key")
 }
 
+
+func initConfig() {
+        viper.SetConfigFile("ddns-cli.yaml")
+        viper.AutomaticEnv() // read in environment variables that match
+
+        // If a config file is found, read it in.
+        if err := viper.ReadInConfig(); err != nil {
+                log.Printf("Error reading config '%s': %v\n", viper.ConfigFileUsed(), err)
+        }
+}

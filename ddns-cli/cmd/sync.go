@@ -13,6 +13,7 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	lib "github.com/johanix/gen-notify-test/lib"
 )
@@ -42,36 +43,67 @@ var syncCmd = &cobra.Command{
 			log.Fatalf("Error: parent primary nameserver not specified.")
 		}
 
-		var keyrr *dns.KEY
-		var cs crypto.Signer
-		var rr dns.RR
+		keyrr, cs := LoadSigningKey(keyfile)
 
-		if keyfile != "" {
-			var ktype string
-			var err error
-			_, cs, rr, ktype, err = lib.ReadKey(keyfile)
-			if err != nil {
-				log.Fatalf("Error reading key '%s': %v", keyfile, err)
-			}
+		var differ bool
+		var adds, removes []dns.RR
 
-			if ktype != "KEY" {
-				log.Fatalf("Key must be a KEY RR")
-			}
-
-			keyrr = rr.(*dns.KEY)
+		if viper.GetBool("ddns.update-ns") {
+			differ, adds, removes = ComputeRRDiff(childpri, parpri,
+				lib.Zonename, dns.TypeNS)
+		} else {
+			fmt.Printf("*** Note: configured NOT to update NS RRset.\n")
 		}
 
-		nsdiffer, adds, removes := ComputeRRDiff(childpri, parpri,
-			  		   		 lib.Zonename, dns.TypeNS)
-
-		_, _ = ComputeBailiwickNS(childpri, parpri, lib.Zonename)
-	
-
-		if !nsdiffer {
-		   fmt.Printf("Parent delegation data is in sync with child. No update needed.\n")
-		   os.Exit(0)
+		child_ns_inb, parent_ns_inb := ComputeBailiwickNS(childpri, parpri, lib.Zonename)
+		for _, ns := range child_ns_inb {
+			fmt.Printf("Child in-bailiwick NS: %s\n", ns)
 		}
-		
+		for _, ns := range parent_ns_inb {
+			fmt.Printf("Parent in-bailiwick NS: %s\n", ns)
+		}
+
+		for _, ns := range child_ns_inb {
+			if viper.GetBool("ddns.update-a") {
+				fmt.Printf("Comparing A glue for child NS %s:\n", ns)
+				gluediff, a_glue_adds, a_glue_removes := ComputeRRDiff(childpri,
+					parpri, ns, dns.TypeA)
+				if gluediff {
+					differ = true
+					for _, rr := range a_glue_removes {
+						removes = append(removes, rr)
+					}
+					for _, rr := range a_glue_adds {
+						adds = append(adds, rr)
+					}
+				}
+			} else {
+			  fmt.Printf("*** Note: configured NOT to update A glue.\n")
+			}
+
+			if viper.GetBool("ddns.update-aaaa") {
+				fmt.Printf("Comparing AAAA glue for child NS %s:\n", ns)
+				gluediff, aaaa_glue_adds, aaaa_glue_removes := ComputeRRDiff(childpri,
+					parpri, ns, dns.TypeAAAA)
+				if gluediff {
+					differ = true
+					for _, rr := range aaaa_glue_removes {
+						removes = append(removes, rr)
+					}
+					for _, rr := range aaaa_glue_adds {
+						adds = append(adds, rr)
+					}
+				}
+			} else {
+			  fmt.Printf("*** Note: configured NOT to update AAAA glue.\n")
+			}
+		}
+
+		if !differ {
+			fmt.Printf("Parent delegation data is in sync with child. No update needed.\n")
+			os.Exit(0)
+		}
+
 		const update_scheme = 2
 		dsynctarget, err := lib.LookupDSYNCTarget(pzone, parpri, dns.StringToType["ANY"], update_scheme)
 		if err != nil {
@@ -108,6 +140,28 @@ func init() {
 	syncCmd.PersistentFlags().StringVarP(&childpri, "primary", "p", "", "Address:port of child primary namserver")
 	syncCmd.PersistentFlags().StringVarP(&parpri, "pprimary", "P", "", "Address:port of parent primary nameserver")
 	syncCmd.PersistentFlags().StringVarP(&lib.Global.IMR, "imr", "i", "", "IMR to send the query to")
+}
+
+func LoadSigningKey(keyfile string) (*dns.KEY, crypto.Signer) {
+        var keyrr *dns.KEY
+	var cs crypto.Signer
+	var rr dns.RR
+
+	if keyfile != "" {
+		var ktype string
+		var err error
+		_, cs, rr, ktype, err = lib.ReadKey(keyfile)
+		if err != nil {
+			log.Fatalf("Error reading key '%s': %v", keyfile, err)
+		}
+
+		if ktype != "KEY" {
+			log.Fatalf("Key must be a KEY RR")
+		}
+
+		keyrr = rr.(*dns.KEY)
+	}
+	return keyrr, cs
 }
 
 func SendUpdate(msg dns.Msg, zonename string, target lib.DSYNCTarget) error {
@@ -161,15 +215,15 @@ func CreateUpdate(parent, child string, adds, removes []dns.RR) (dns.Msg, error)
 	m.Insert(adds)
 
 	for _, nsr := range removes {
-	    if ns, ok := nsr.(*dns.NS); ok { // if removing an NS, then also remove any glue
-	       if strings.HasSuffix(ns.Ns, child) {
-	       	  rrA := new(dns.A)
-		  rrA.Hdr = dns.RR_Header{Name: ns.Ns, Rrtype: dns.TypeA, Class: dns.ClassANY, Ttl: 3600}
-	       	  rrAAAA := new(dns.AAAA)
-		  rrAAAA.Hdr = dns.RR_Header{Name: ns.Ns, Rrtype: dns.TypeAAAA, Class: dns.ClassANY, Ttl: 3600}
-	       	  m.RemoveRRset([]dns.RR{ rrA, rrAAAA })
-	       }
-	    }
+		if ns, ok := nsr.(*dns.NS); ok { // if removing an NS, then also remove any glue
+			if strings.HasSuffix(ns.Ns, child) {
+				rrA := new(dns.A)
+				rrA.Hdr = dns.RR_Header{Name: ns.Ns, Rrtype: dns.TypeA, Class: dns.ClassANY, Ttl: 3600}
+				rrAAAA := new(dns.AAAA)
+				rrAAAA.Hdr = dns.RR_Header{Name: ns.Ns, Rrtype: dns.TypeAAAA, Class: dns.ClassANY, Ttl: 3600}
+				m.RemoveRRset([]dns.RR{rrA, rrAAAA})
+			}
+		}
 	}
 
 	if lib.Global.Debug {
@@ -179,21 +233,22 @@ func CreateUpdate(parent, child string, adds, removes []dns.RR) (dns.Msg, error)
 }
 
 func ComputeRRDiff(childpri, parpri, owner string, rrtype uint16) (bool, []dns.RR, []dns.RR) {
-        rrname := dns.TypeToString[rrtype]
+	fmt.Printf("*** ComputeRRDiff(%s, %s)\n", owner, dns.TypeToString[rrtype])
+	rrname := dns.TypeToString[rrtype]
 	rrs_parent, err := lib.AuthQuery(owner, parpri, rrtype)
 	if err != nil {
 		log.Fatalf("Error: looking up child %s %s RRset in parent primary %s: %v",
 			lib.Zonename, rrname, parpri, err)
 	}
 
-	rrs_child, err := lib.AuthQuery(lib.Zonename, childpri, rrtype)
+	rrs_child, err := lib.AuthQuery(owner, childpri, rrtype)
 	if err != nil {
 		log.Fatalf("Error: looking up child %s %s RRset in child primary %s: %v",
 			lib.Zonename, rrname, childpri, err)
 	}
 
 	fmt.Printf("%d %s RRs from parent, %d %s RRs from child\n",
-		       len(rrs_parent), rrname, len(rrs_child), rrname)
+		len(rrs_parent), rrname, len(rrs_child), rrname)
 	if lib.Global.Debug {
 		for _, rrp := range rrs_parent {
 			fmt.Printf("Parent: %s\n", rrp.String())
@@ -218,7 +273,7 @@ func ComputeRRDiff(childpri, parpri, owner string, rrtype uint16) (bool, []dns.R
 }
 
 func ComputeBailiwickNS(childpri, parpri, owner string) ([]string, []string) {
-     rrname := dns.TypeToString[dns.TypeNS]
+	rrname := dns.TypeToString[dns.TypeNS]
 	ns_parent, err := lib.AuthQuery(owner, parpri, dns.TypeNS)
 	if err != nil {
 		log.Fatalf("Error: looking up child %s %s RRset in parent primary %s: %v",
@@ -232,7 +287,7 @@ func ComputeBailiwickNS(childpri, parpri, owner string) ([]string, []string) {
 	}
 
 	fmt.Printf("%d %s RRs from parent, %d %s RRs from child\n",
-		       len(ns_parent), rrname, len(ns_child), rrname)
+		len(ns_parent), rrname, len(ns_child), rrname)
 	if lib.Global.Debug {
 		for _, rrp := range ns_parent {
 			fmt.Printf("Parent: %s\n", rrp.String())
@@ -244,20 +299,20 @@ func ComputeBailiwickNS(childpri, parpri, owner string) ([]string, []string) {
 	}
 
 	var parent_ns_inb, child_ns_inb []string
-	
+
 	for _, rr := range ns_parent {
-	    if ns, ok := rr.(*dns.NS); ok {
-	       if strings.HasSuffix(ns.Header().Name, owner) {
-	       	  parent_ns_inb = append(parent_ns_inb, ns.Ns)
-	       }
-	    }
+		if ns, ok := rr.(*dns.NS); ok {
+			if strings.HasSuffix(ns.Ns, owner) {
+				parent_ns_inb = append(parent_ns_inb, ns.Ns)
+			}
+		}
 	}
 	for _, rr := range ns_child {
-	    if ns, ok := rr.(*dns.NS); ok {
-	       if strings.HasSuffix(ns.Header().Name, owner) {
-	       	  child_ns_inb = append(child_ns_inb, ns.Ns)
-	       }
-	    }
+		if ns, ok := rr.(*dns.NS); ok {
+			if strings.HasSuffix(ns.Ns, owner) {
+				child_ns_inb = append(child_ns_inb, ns.Ns)
+			}
+		}
 	}
 
 	return child_ns_inb, parent_ns_inb

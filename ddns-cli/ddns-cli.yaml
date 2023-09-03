@@ -1,0 +1,7 @@
+ddns:
+   keydirectory:        /tmp/keys
+   update-ns:           false
+   update-a:            true
+   update-aaaa:         false
+   update-ds:		false # NYI
+   update-key:		false # NYI
