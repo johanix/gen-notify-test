@@ -9,6 +9,7 @@ replace (
 
 require (
 	github.com/johanix/gen-notify-test/lib v0.0.0-00010101000000-000000000000
+	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/miekg/dns v1.1.55
 	github.com/spf13/viper v1.15.0
 )

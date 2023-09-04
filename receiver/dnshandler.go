@@ -21,12 +21,12 @@ type UpdatePolicy struct {
      RRtypes	  map[uint16]bool
 }
 
-func DnsEngine(scannerq chan ScanRequest) error {
+func DnsEngine(scannerq chan ScanRequest, updateq chan UpdateRequest) error {
 	addresses := viper.GetStringSlice("dnsengine.addresses")
 
 	verbose := viper.GetBool("dnsengine.verbose")
 	debug := viper.GetBool("dnsengine.debug")
-	dns.HandleFunc(".", createHandler(scannerq, verbose, debug))
+	dns.HandleFunc(".", createHandler(scannerq, updateq, verbose, debug))
 
 	log.Printf("DnsEngine: addresses: %v", addresses)
 	for _, addr := range addresses {
@@ -49,7 +49,7 @@ func DnsEngine(scannerq chan ScanRequest) error {
 	return nil
 }
 
-func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.ResponseWriter, r *dns.Msg) {
+func createHandler(scannerq chan ScanRequest, updateq chan UpdateRequest, verbose, debug bool) func(w dns.ResponseWriter, r *dns.Msg) {
 
 	keydir := viper.GetString("ddns.keydirectory")
 	keymap, err := lib.ReadPubKeys(keydir)
@@ -109,14 +109,14 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			return
 
 		case dns.OpcodeUpdate:
-			log.Printf("Received UPDATE for zone '%s' containing %d RRs in the update section", zone, len(r.Ns))
+			log.Printf("DnsEngine: Received UPDATE for zone '%s' containing %d RRs in the update section", zone, len(r.Ns))
 
 			m := new(dns.Msg)
 			m.SetReply(r)
 
 			rcode, signername, err := ValidateUpdate(r, keymap)
 			if err != nil {
-				log.Printf("Eror from ValidateUpdate(): %v", err)
+				log.Printf("Error from ValidateUpdate(): %v", err)
 			}
 
 			// send response
@@ -134,11 +134,12 @@ func createHandler(scannerq chan ScanRequest, verbose, debug bool) func(w dns.Re
 			}
 
 			if !ok {
-			   log.Printf("ApproveUpdate rejected the update. Ignored.")
+			   log.Printf("DnsEngine: ApproveUpdate rejected the update. Ignored.")
 			   return
 			}
-			log.Printf("Update validated and approved. Queued for zone update.")
+			log.Printf("DnsEngine: Update validated and approved. Queued for zone update.")
 			// send into suitable channel for pending updates
+			updateq <- UpdateRequest{Cmd: "UPDATE", ZoneName: zone, Actions: r.Ns }
 			return
 
 		default:
@@ -160,31 +161,31 @@ func ValidateUpdate(r *dns.Msg, keymap map[string]dns.KEY) (uint8, string, error
 	}
 
 	sig := r.Extra[0].(*dns.SIG)
-	log.Printf("Update is signed by \"%s\".", sig.RRSIG.SignerName)
+	log.Printf("* Update is signed by \"%s\".", sig.RRSIG.SignerName)
 	msgbuf, err := r.Pack()
 	if err != nil {
-		log.Printf("Error from msg.Pack(): %v", err)
+		log.Printf("= Error from msg.Pack(): %v", err)
 		rcode = dns.RcodeFormatError
 	}
 
 	keyrr, ok := keymap[sig.RRSIG.SignerName]
 	if !ok {
-		log.Printf("Error: key \"\" is unknown.", sig.RRSIG.SignerName)
+		log.Printf("= Error: key \"%s\" is unknown.", sig.RRSIG.SignerName)
 		rcode = dns.RcodeBadKey
 	}
 
 	err = sig.Verify(&keyrr, msgbuf)
 	if err != nil {
-		log.Printf("Error from sig.Varify(): %v", err)
+		log.Printf("= Error from sig.Varify(): %v", err)
 		rcode = dns.RcodeBadSig
 	} else {
-		log.Printf("SIG verified correctly")
+		log.Printf("* Update SIG verified correctly")
 	}
 
 	if lib.SIGValidityPeriod(sig, time.Now()) {
-		log.Printf("SIG is within its validity period")
+		log.Printf("* Update SIG is within its validity period")
 	} else {
-		log.Printf("SIG is NOT within its validity period")
+		log.Printf("= Update SIG is NOT within its validity period")
 		rcode = dns.RcodeBadTime
 	}
 	return rcode, sig.RRSIG.SignerName, nil

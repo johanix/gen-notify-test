@@ -1,5 +1,5 @@
 /*
- * Johan Stenstam, johani@netnod.se
+ * Johan Stenstam, johan.stenstam@internetstiftelsen.se
  */
 
 package main
@@ -18,7 +18,7 @@ type ScanRequest struct {
 	RRtype		string
 }
 
-func ScannerEngine(scannerq chan ScanRequest) error {
+func ScannerEngine(scannerq chan ScanRequest, updateq chan UpdateRequest) error {
 	interval := viper.GetInt("scanner.interval")
 	if interval < 10 {
 		interval = 10
