@@ -26,7 +26,9 @@ var readkeyCmd = &cobra.Command{
 and usage of using your command. For example:
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("readkey called")
+		if filename == "" {
+			log.Fatalf("Error: filename with key not specified")
+		}
 
 		k, cs, rr, ktype, err := ReadKey(filename)
 		if err != nil {
@@ -41,64 +43,9 @@ to quickly create a Cobra application.`,
 	},
 }
 
-var signMsgCmd = &cobra.Command{
-	Use:   "signmsg",
-	Short: "sign a dns Msg using a private key",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if filename == "" {
-			log.Fatalf("Error: filename with key not specified")
-		}
-
-		_, cs, rr, ktype, err := ReadKey(filename)
-		if err != nil {
-			log.Fatalf("Error reading key '%s': %v", filename, err)
-		}
-
-		if ktype != "KEY" {
-			log.Fatalf("Key must be a KEY RR")
-		}
-
-		keyrr := rr.(*dns.KEY)
-
-		m := new(dns.Msg)
-		m.SetUpdate("dnslab.")
-		addstr := "alpha.dnslab. 60 IN NS ns.alpha.dnslab."
-		add1, err := dns.NewRR(addstr)
-		if err != nil {
-			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
-		}
-
-		addstr = "alpha.dnslab. 60 IN NS nsgo.alpha.dnslab."
-		add2, err := dns.NewRR(addstr)
-		if err != nil {
-			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
-		}
-
-		m.Insert([]dns.RR{add1, add2})
-
-		m2, err := SignMsgNG(*m, "alpha.dnslab.", cs, keyrr)
-		if err != nil {
-			log.Fatalf("Error parsing rr to add '%s': %v", addstr, err)
-		}
-
-		fmt.Printf("M2: %s\n", m2.String())
-
-		res2, err := dns.Exchange(m, "127.0.0.1:5310")
-		if err != nil {
-			log.Fatalf("Error from dns.Exchange(): %v", err)
-		}
-		fmt.Printf("Response from parent: %s\n", res2.String())
-
-	},
-}
-
 func init() {
 	//	rootCmd.AddCommand(readkeyCmd, signMsgCmd)
 	readkeyCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
-	signMsgCmd.Flags().StringVarP(&filename, "keyfile", "f", "", "Name of private key file")
 }
 
 func sigLifetime(t time.Time) (uint32, uint32) {

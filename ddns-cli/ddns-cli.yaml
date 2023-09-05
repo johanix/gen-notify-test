@@ -5,3 +5,8 @@ ddns:
    update-aaaa:         false
    update-ds:		false # NYI
    update-key:		false # NYI
+
+roll:
+   keygen:
+      mode:		external
+      generator:	/usr/pkg/bin/dnssec-keygen

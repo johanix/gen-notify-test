@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -39,14 +40,14 @@ var rollCmd = &cobra.Command{
 
 		keyrr, cs := LoadSigningKey(keyfile)
 		if keyrr != nil {
-		   fmt.Printf("keyid=%d\n", keyrr.KeyTag())
+			fmt.Printf("keyid=%d\n", keyrr.KeyTag())
 		} else {
-		   fmt.Printf("No signing key specified.\n")
+			fmt.Printf("No signing key specified.\n")
 		}
 
 		newkey, err := GenerateSigningKey(lib.Zonename, dns.AlgorithmToString[keyrr.Algorithm])
 		if err != nil {
-		   log.Fatalf("Error from GenerateSigningKey: %v", err)
+			log.Fatalf("Error from GenerateSigningKey: %v", err)
 		}
 		fmt.Printf("new key: %s\n", newkey.String())
 
@@ -56,8 +57,8 @@ var rollCmd = &cobra.Command{
 			log.Fatalf("Error from LookupDDNSTarget(%s, %s): %v", pzone, parpri, err)
 		}
 
-		adds := []dns.RR{ newkey }
-		removes := []dns.RR{ keyrr }
+		adds := []dns.RR{newkey}
+		removes := []dns.RR{keyrr}
 
 		msg, err := CreateUpdate(pzone, lib.Zonename, adds, removes)
 		if err != nil {
@@ -78,7 +79,6 @@ var rollCmd = &cobra.Command{
 		if err != nil {
 			log.Fatalf("Error from SendUpdate(%v): %v", dsynctarget, err)
 		}
-		
 
 	},
 }
@@ -94,36 +94,64 @@ func init() {
 }
 
 func GenerateSigningKey(owner, alg string) (*dns.KEY, error) {
-     keygenprog := viper.GetString("roll.keygenerator")
-     if keygenprog == "" {
-     	log.Fatalf("Error: key generator program not specified.")
-     }
+	mode := viper.GetString("roll.keygen.mode")
+	var keyrr *dns.KEY
+	switch mode {
+	case "internal":
+	        nkey := new(dns.KEY)
+		nkey.Hdr.Name = owner
+		nkey.Hdr.Rrtype = dns.TypeKEY
+		nkey.Hdr.Class = dns.ClassINET
+		nkey.Algorithm  = dns.StringToAlgorithm["ED25519"]
+		cpk, err := nkey.Generate(256)
+		if err != nil {
+		   log.Fatalf("Error from nkey.Generate: %v", err)
+		}
 
-     cmdline := fmt.Sprintf("%s -a %s -T KEY -n ZONE %s", keygenprog, alg, owner)
-     fmt.Printf("cmd: %s\n", cmdline)
-     cmdsl := strings.Fields(cmdline)
-     command := exec.Command(cmdsl[0], cmdsl[1:]...)
-     out, err := command.CombinedOutput()
-     if err != nil {
-     	log.Printf("Error from exec: %v: %v\n", cmdsl, err)
-     }
+		kbasename := fmt.Sprintf("K%s+%03d+%03d", owner, nkey.Algorithm, nkey.KeyTag())
+		log.Printf("Key basename: %s", kbasename)
 
-     var keyname string
+		log.Printf("Generated key: %s", nkey.String())
+		log.Printf("Generated signer: %v",cpk)
 
-     for _, l := range strings.Split(string(out), "\n") {
-     	 if len(l) != 0 {
-	    elems := strings.Fields(l)
-	    if strings.HasPrefix(elems[0], "K"+owner) {
-	       keyname = elems[0]
-	       fmt.Printf("New key is in file %s\n", keyname)
-	    }
-	 }
-     }
+		nkey.Hdr.Rrtype = dns.TypeKEY
+		os.Exit(0)
 
-     keyrr, _ := LoadSigningKey(keyname + ".key")
-     if err != nil {
-	   return keyrr, err
-     } 
+	case "external":
+		keygenprog := viper.GetString("roll.keygen.generator")
+		if keygenprog == "" {
+			log.Fatalf("Error: key generator program not specified.")
+		}
 
-     return keyrr, nil     
+		cmdline := fmt.Sprintf("%s -a %s -T KEY -n ZONE %s", keygenprog, alg, owner)
+		fmt.Printf("cmd: %s\n", cmdline)
+		cmdsl := strings.Fields(cmdline)
+		command := exec.Command(cmdsl[0], cmdsl[1:]...)
+		out, err := command.CombinedOutput()
+		if err != nil {
+			log.Printf("Error from exec: %v: %v\n", cmdsl, err)
+		}
+
+		var keyname string
+
+		for _, l := range strings.Split(string(out), "\n") {
+			if len(l) != 0 {
+				elems := strings.Fields(l)
+				if strings.HasPrefix(elems[0], "K"+owner) {
+					keyname = elems[0]
+					fmt.Printf("New key is in file %s\n", keyname)
+				}
+			}
+		}
+
+		keyrr, _ = LoadSigningKey(keyname + ".key")
+		if err != nil {
+			return keyrr, err
+		}
+
+	default:
+		log.Fatalf("Error: unknown keygen mode: \"%s\".", mode)
+	}
+
+	return keyrr, nil
 }
