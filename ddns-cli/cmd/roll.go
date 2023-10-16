@@ -4,9 +4,14 @@
 package cmd
 
 import (
+        "crypto"
+	"crypto/rsa"
+	"crypto/ed25519"
+	"crypto/ecdsa"
+	
 	"fmt"
 	"log"
-	"os"
+	// "os"
 	"os/exec"
 	"strings"
 
@@ -45,10 +50,12 @@ var rollCmd = &cobra.Command{
 			fmt.Printf("No signing key specified.\n")
 		}
 
-		newkey, err := GenerateSigningKey(lib.Zonename, dns.AlgorithmToString[keyrr.Algorithm])
+		newkey, newcs, newpriv, err := GenerateSigningKey(lib.Zonename, keyrr.Algorithm)
 		if err != nil {
 			log.Fatalf("Error from GenerateSigningKey: %v", err)
 		}
+		_ = newcs	// XXX: should store the cs and new private key somewhere.
+		_ = newpriv 
 		fmt.Printf("new key: %s\n", newkey.String())
 
 		const update_scheme = 2
@@ -93,17 +100,33 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&lib.Global.IMR, "imr", "i", "", "IMR to send the query to")
 }
 
-func GenerateSigningKey(owner, alg string) (*dns.KEY, error) {
-	mode := viper.GetString("roll.keygen.mode")
+func GenerateSigningKey(owner string, alg uint8) (*dns.KEY, crypto.Signer, crypto.PrivateKey, error) {
 	var keyrr *dns.KEY
+	var cs crypto.Signer
+	var privkey crypto.PrivateKey
+	var err error
+
+	mode := viper.GetString("roll.keygen.mode")
+
+	var bits int
+	switch alg {
+	case dns.ECDSAP256SHA256, dns.ED25519:
+	     bits = 256
+	case dns.ECDSAP384SHA384:
+	     bits = 384
+	case dns.RSASHA256, dns.RSASHA512:
+	     bits = 2048
+	}
+
 	switch mode {
 	case "internal":
 	        nkey := new(dns.KEY)
 		nkey.Hdr.Name = owner
 		nkey.Hdr.Rrtype = dns.TypeKEY
 		nkey.Hdr.Class = dns.ClassINET
-		nkey.Algorithm  = dns.StringToAlgorithm["ED25519"]
-		cpk, err := nkey.Generate(256)
+		// nkey.Algorithm  = dns.StringToAlgorithm["ED25519"]
+		nkey.Algorithm  = alg
+		privkey, err = nkey.Generate(bits)
 		if err != nil {
 		   log.Fatalf("Error from nkey.Generate: %v", err)
 		}
@@ -112,10 +135,10 @@ func GenerateSigningKey(owner, alg string) (*dns.KEY, error) {
 		log.Printf("Key basename: %s", kbasename)
 
 		log.Printf("Generated key: %s", nkey.String())
-		log.Printf("Generated signer: %v",cpk)
+		log.Printf("Generated signer: %v",privkey)
 
 		nkey.Hdr.Rrtype = dns.TypeKEY
-		os.Exit(0)
+		keyrr = nkey
 
 	case "external":
 		keygenprog := viper.GetString("roll.keygen.generator")
@@ -123,7 +146,9 @@ func GenerateSigningKey(owner, alg string) (*dns.KEY, error) {
 			log.Fatalf("Error: key generator program not specified.")
 		}
 
-		cmdline := fmt.Sprintf("%s -a %s -T KEY -n ZONE %s", keygenprog, alg, owner)
+		algstr := dns.AlgorithmToString[alg]
+
+		cmdline := fmt.Sprintf("%s -a %s -T KEY -n ZONE %s", keygenprog, algstr, owner)
 		fmt.Printf("cmd: %s\n", cmdline)
 		cmdsl := strings.Fields(cmdline)
 		command := exec.Command(cmdsl[0], cmdsl[1:]...)
@@ -146,12 +171,24 @@ func GenerateSigningKey(owner, alg string) (*dns.KEY, error) {
 
 		keyrr, _ = LoadSigningKey(keyname + ".key")
 		if err != nil {
-			return keyrr, err
+			return keyrr, cs, privkey, err
 		}
 
 	default:
 		log.Fatalf("Error: unknown keygen mode: \"%s\".", mode)
 	}
 
-	return keyrr, nil
+        switch alg {
+        case dns.RSASHA256:
+                cs = privkey.(*rsa.PrivateKey)
+        case dns.ED25519:
+                cs = privkey.(*ed25519.PrivateKey)
+	case dns.ECDSAP256SHA256, dns.ECDSAP384SHA384:
+                cs = privkey.(*ecdsa.PrivateKey)
+        default:
+                log.Fatalf("Error: no support for algorithm %s yet", dns.AlgorithmToString[alg])
+        }
+
+
+	return keyrr, cs, privkey, nil
 }

@@ -7,6 +7,8 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/ed25519"
+	"crypto/ecdsa"
+
 	"fmt"
 	"log"
 	"os"
@@ -161,12 +163,12 @@ func ReadKey(filename string) (crypto.PrivateKey, crypto.Signer, dns.RR, string,
 	}
 
 	switch alg {
-	case dns.RSASHA256:
+	case dns.RSASHA256, dns.RSASHA512:
 		cs = k.(*rsa.PrivateKey)
 	case dns.ED25519:
 		cs = k.(*ed25519.PrivateKey)
-//	case dns.RSASHA256:
-//		cs = k.(*rsa.PrivateKey)
+	case dns.ECDSAP256SHA256, dns.ECDSAP384SHA384:
+		cs = k.(*ecdsa.PrivateKey)
 	default:
 		log.Fatalf("Error: no support for algorithm %s yet", dns.AlgorithmToString[alg])
 	}
