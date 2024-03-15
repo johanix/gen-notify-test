@@ -17,8 +17,8 @@ import (
 )
 
 type UpdatePolicy struct {
-     Type	  string // only "selfsub" known at the moment
-     RRtypes	  map[uint16]bool
+	Type    string // only "selfsub" known at the moment
+	RRtypes map[uint16]bool
 }
 
 func DnsEngine(scannerq chan ScanRequest, updateq chan UpdateRequest) error {
@@ -58,29 +58,29 @@ func createHandler(scannerq chan ScanRequest, updateq chan UpdateRequest, verbos
 	}
 
 	policy := UpdatePolicy{
-			Type:		viper.GetString("ddns.policy.type"),
-			RRtypes:	map[uint16]bool{},
-		  }
+		Type:    viper.GetString("ddns.policy.type"),
+		RRtypes: map[uint16]bool{},
+	}
 
 	switch policy.Type {
 	case "selfsub", "self":
-	     // all ok, we know these
+		// all ok, we know these
 	default:
-	   log.Fatalf("Error: unknown update policy type: \"%s\". Terminating.", policy.Type)
+		log.Fatalf("Error: unknown update policy type: \"%s\". Terminating.", policy.Type)
 	}
-		  
+
 	var rrtypes []string
 	for _, rrstr := range viper.GetStringSlice("ddns.policy.rrtypes") {
-	    if rrt, ok := dns.StringToType[rrstr]; ok {
-	       policy.RRtypes[rrt] = true
-	       rrtypes = append(rrtypes, rrstr)
-	    } else {
-	      log.Printf("Unknown RR type: \"%s\". Ignoring.", rrstr)
-	    }
+		if rrt, ok := dns.StringToType[rrstr]; ok {
+			policy.RRtypes[rrt] = true
+			rrtypes = append(rrtypes, rrstr)
+		} else {
+			log.Printf("Unknown RR type: \"%s\". Ignoring.", rrstr)
+		}
 	}
 
 	if len(policy.RRtypes) == 0 {
-	   log.Fatalf("Error: zero valid RRtypes listed in policy.")
+		log.Fatalf("Error: zero valid RRtypes listed in policy.")
 	}
 	log.Printf("DnsEngine: using update policy \"%s\" with RRtypes: %v", policy.Type, rrtypes)
 
@@ -134,12 +134,12 @@ func createHandler(scannerq chan ScanRequest, updateq chan UpdateRequest, verbos
 			}
 
 			if !ok {
-			   log.Printf("DnsEngine: ApproveUpdate rejected the update. Ignored.")
-			   return
+				log.Printf("DnsEngine: ApproveUpdate rejected the update. Ignored.")
+				return
 			}
 			log.Printf("DnsEngine: Update validated and approved. Queued for zone update.")
 			// send into suitable channel for pending updates
-			updateq <- UpdateRequest{Cmd: "UPDATE", ZoneName: zone, Actions: r.Ns }
+			updateq <- UpdateRequest{Cmd: "UPDATE", ZoneName: zone, Actions: r.Ns}
 			return
 
 		default:
@@ -153,74 +153,79 @@ func ValidateUpdate(r *dns.Msg, keymap map[string]dns.KEY) (uint8, string, error
 	var rcode uint8 = dns.RcodeSuccess
 
 	if len(r.Extra) == 0 {
-	   return dns.RcodeFormatError, "", nil // there is no signature on the update
+		return dns.RcodeFormatError, "", nil // there is no signature on the update
 	}
 
-	if _, ok := r.Extra[0].(*dns.SIG); !ok {
-	   return dns.RcodeFormatError, "", nil // there is no SIG(0) signature on the update
-	}
+	for _, rr := range r.Extra {
+		if sigRR, ok := rr.(*dns.SIG); ok && sigRR.Header().Rrtype == dns.TypeSIG {
+			// sig := r.Extra[0].(*dns.SIG)
+			sigName := sigRR.RRSIG.SignerName
+			log.Printf("* Update is signed by \"%s\".", sigName)
 
-	sig := r.Extra[0].(*dns.SIG)
-	log.Printf("* Update is signed by \"%s\".", sig.RRSIG.SignerName)
-	msgbuf, err := r.Pack()
-	if err != nil {
-		log.Printf("= Error from msg.Pack(): %v", err)
-		rcode = dns.RcodeFormatError
-	}
+			keyrr, ok := keymap[sigName]
+			if !ok {
+				log.Printf("= Error: key \"%s\" is unknown.", sigName)
+				rcode = dns.RcodeBadKey
+			}
 
-	keyrr, ok := keymap[sig.RRSIG.SignerName]
-	if !ok {
-		log.Printf("= Error: key \"%s\" is unknown.", sig.RRSIG.SignerName)
-		rcode = dns.RcodeBadKey
-	}
+			newMsg := r.Copy()
+			newMsg.Extra = newMsg.Extra[:len(newMsg.Extra)-1]
+			msgbuf, err := newMsg.Pack()
+			if err != nil {
+				log.Printf("= Error from msg.Pack(): %v", err)
+				rcode = dns.RcodeFormatError
+			}
 
-	err = sig.Verify(&keyrr, msgbuf)
-	if err != nil {
-		log.Printf("= Error from sig.Varify(): %v", err)
-		rcode = dns.RcodeBadSig
-	} else {
-		log.Printf("* Update SIG verified correctly")
-	}
+			err = sigRR.Verify(&keyrr, msgbuf)
+			if err != nil {
+				log.Printf("= Error from sig.Varify(): %v", err)
+				rcode = dns.RcodeBadSig
+			} else {
+				log.Printf("* Update SIG verified correctly")
+			}
 
-	if lib.SIGValidityPeriod(sig, time.Now()) {
-		log.Printf("* Update SIG is within its validity period")
-	} else {
-		log.Printf("= Update SIG is NOT within its validity period")
-		rcode = dns.RcodeBadTime
+			if lib.SIGValidityPeriod(sigRR, time.Now()) {
+				log.Printf("* Update SIG is within its validity period")
+			} else {
+				log.Printf("= Update SIG is NOT within its validity period")
+				rcode = dns.RcodeBadTime
+			}
+			return rcode, sigName, nil
+		}
 	}
-	return rcode, sig.RRSIG.SignerName, nil
+	return dns.RcodeFormatError, "", nil // there is no SIG(0) signature on the update
 }
 
 func ApproveUpdate(zone, signername string, r *dns.Msg, policy UpdatePolicy, verbose, debug bool) (bool, error) {
-     log.Printf("Analysing update using policy type %s with allowed RR types %v",
-     			   policy.Type, policy.RRtypes)
+	log.Printf("Analysing update using policy type %s with allowed RR types %v",
+		policy.Type, policy.RRtypes)
 
 	for i := 0; i <= len(r.Ns)-1; i++ {
 		rr := r.Ns[i]
 
 		if !policy.RRtypes[rr.Header().Rrtype] {
-		   log.Printf("ApproveUpdate: update rejected (unapproved RR type: %s)",
-		   			      dns.TypeToString[rr.Header().Rrtype])
-		   return false, nil
+			log.Printf("ApproveUpdate: update rejected (unapproved RR type: %s)",
+				dns.TypeToString[rr.Header().Rrtype])
+			return false, nil
 		}
 
 		switch policy.Type {
 		case "selfsub":
-		     if !strings.HasSuffix(rr.Header().Name, signername) {
-		     	log.Printf("ApproveUpdate: update rejected (owner name %s outside selfsub %s tree)",
-		   			      rr.Header().Name, signername)
-		        return false, nil
-		     }
+			if !strings.HasSuffix(rr.Header().Name, signername) {
+				log.Printf("ApproveUpdate: update rejected (owner name %s outside selfsub %s tree)",
+					rr.Header().Name, signername)
+				return false, nil
+			}
 
 		case "self":
-		     if rr.Header().Name != signername {
-		     	log.Printf("ApproveUpdate: update rejected (owner name %s different from signer name %s in violation of \"self\" policy)",
-		   			      rr.Header().Name, signername)
-		        return false, nil
-		     }
+			if rr.Header().Name != signername {
+				log.Printf("ApproveUpdate: update rejected (owner name %s different from signer name %s in violation of \"self\" policy)",
+					rr.Header().Name, signername)
+				return false, nil
+			}
 		default:
 			log.Printf("ApproveUpdate: unknown policy type: \"%s\"", policy.Type)
-		        return false, nil
+			return false, nil
 		}
 
 		if rr.Header().Class == dns.ClassNONE {

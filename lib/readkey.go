@@ -253,3 +253,13 @@ func SIGValidityPeriod(sig *dns.SIG, t time.Time) bool {
 	te := int64(sig.Expiration) + mode*year68
 	return ti <= utc && utc <= te
 }
+
+// This is simpler, but it is always correct?
+func SIGValidityPeriodNG(sig *dns.SIG, t time.Time) bool {
+     now := time.Now().Unix()
+     if now < int64(sig.Inception) || now > int64(sig.Expiration) {
+            log.Println("Current time is outside the SIG(0) signature validity period")
+            return false
+     }
+     return true
+}
