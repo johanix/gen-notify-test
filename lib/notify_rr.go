@@ -2,7 +2,7 @@
  * Copyright (c) Johan Stenstam, johani@johani.org
  */
 
-package cmd
+package lib
 
 import (
 	"encoding/binary"

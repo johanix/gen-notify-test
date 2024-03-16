@@ -1,9 +1,14 @@
 # Binaries for programs and plugins
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
+*~
+*/*~
+*/*/*~
+notify/notify
+receiver/receiver
+ddns-cli/ddns-cli
 
 # Test binary, built with `go test -c`
 *.test

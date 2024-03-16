@@ -8,13 +8,14 @@ import (
 	"log"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
+
+	lib "github.com/johanix/gen-notify-test/lib"
 )
 
-var zonename, rrstr string
+var zonename string
 var imr = "8.8.8.8:53"
 
 var sendCmd = &cobra.Command{
@@ -26,7 +27,7 @@ var sendCdsCmd = &cobra.Command{
 	Use:   "cds",
 	Short: "Send a Notify(CDS) to parent of zone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(dns.Fqdn(zonename), "CDS")
+		SendNotify(dns.Fqdn(lib.Zonename), "CDS")
 	},
 }
 
@@ -34,7 +35,7 @@ var sendCsyncCmd = &cobra.Command{
 	Use:   "csync",
 	Short: "Send a Notify(CSYNC) to parent of zone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(dns.Fqdn(zonename), "CSYNC")
+		SendNotify(dns.Fqdn(lib.Zonename), "CSYNC")
 	},
 }
 
@@ -42,7 +43,7 @@ var sendDnskeyCmd = &cobra.Command{
 	Use:   "dnskey",
 	Short: "Send a Notify(DNSKEY) to other signers of zone (multi-signer setup)",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(dns.Fqdn(zonename), "DNSKEY")
+		SendNotify(dns.Fqdn(lib.Zonename), "DNSKEY")
 	},
 }
 
@@ -50,160 +51,90 @@ var sendSoaCmd = &cobra.Command{
 	Use:   "soa",
 	Short: "Send a normal Notify(SOA) to someone",
 	Run: func(cmd *cobra.Command, args []string) {
-		SendNotify(dns.Fqdn(zonename), "SOA")
-	},
-}
-
-var torfc3597Cmd = &cobra.Command{
-	Use:   "rfc3597",
-	Short: "Generate the RFC 3597 representation of a DNS record",
-	Run: func(cmd *cobra.Command, args []string) {
-	        if rrstr == "" {
-		   log.Fatalf("Record to generate RFC 3597 representation for not specified.")
-		}
-		
-		rr, err := dns.NewRR(rrstr)
-		if err != nil {
-			log.Fatal("Could not parse record \"%s\": %v", rrstr, err)
-		}
-
-		fmt.Printf("Normal   (len=%d): \"%s\"\n", dns.Len(rr), rr.String())
-		u := new(dns.RFC3597)
-		u.ToRFC3597(rr)
-		fmt.Printf("RFC 3597 (len=%d): \"%s\"\n", dns.Len(u), u.String())
+		SendNotify(dns.Fqdn(lib.Zonename), "SOA")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(sendCmd)
 	sendCmd.AddCommand(sendCdsCmd, sendCsyncCmd, sendDnskeyCmd, sendSoaCmd)
-	rootCmd.AddCommand(torfc3597Cmd)
 
-	sendCmd.PersistentFlags().StringVarP(&zonename, "zone", "z", "", "Zone to send a parent notify for")
-	torfc3597Cmd.Flags().StringVarP(&rrstr, "record", "r", "", "Record to convert to RFC 3597 notation")
+	sendCmd.PersistentFlags().StringVarP(&lib.Zonename, "zone", "z", "", "Zone to send a parent notify for")
+	sendCmd.PersistentFlags().StringVarP(&pzone, "pzone", "Z", "", "Parent zone to sync via DDNS")
+	sendCmd.PersistentFlags().StringVarP(&childpri, "primary", "p", "", "Address:port of child primary namserver")
+	sendCmd.PersistentFlags().StringVarP(&parpri, "pprimary", "P", "", "Address:port of parent primary nameserver")
 }
 
+var pzone, childpri, parpri string
+
 func SendNotify(zonename string, ntype string) {
-        var lookupzone string
+	var lookupzone, lookupserver string
 	if zonename == "." {
 		fmt.Printf("Error: zone name not specified. Terminating.\n")
 		os.Exit(1)
 	}
 
+	if childpri == "" {
+		log.Fatalf("Error: child primary nameserver not specified.")
+	}
+
 	switch ntype {
 	case "DNSKEY":
 		lookupzone = zonename
+		lookupserver = childpri
 	default:
-		lookupzone = ParentZone(zonename, imr)
-	}
-	
-	var notify_type = dns.StringToType[ntype]
-
-	prrs, err := NotifyQuery(lookupzone)
-
-	found := false
-	var notify_rr *dns.PrivateRR
-
-	for _, prr := range prrs {
-		if prr.Data.(*NOTIFY).Type == notify_type {
-			found = true
-			notify_rr = prr
-			break
+		// lookupzone = lib.ParentZone(zonename, lib.Global.IMR)
+		if pzone == "" {
+			log.Fatalf("Error: parent zone name not specified.")
 		}
-	}
-	if !found {
-		fmt.Printf("No notification destination found for NOTIFY(%s) for zone %s. Ignoring.\n",
-			ntype, zonename)
-		os.Exit(1)
-	}
+		pzone = dns.Fqdn(pzone)
 
-	notify, _ := notify_rr.Data.(*NOTIFY)
-
-	if verbose {
-		fmt.Printf("Looked up published notification address for NOTIFY(%s) for zone %s:\n\n%s\n\n",
-			ntype, zonename, notify_rr.String())
+		if parpri == "" {
+			log.Fatalf("Error: parent primary nameserver not specified.")
+		}
+		lookupzone = pzone
+		lookupserver = parpri
 	}
 
-	dest_addrs, err := net.LookupHost(notify.Dest)
+	const notify_scheme = 1
+	dsynctarget, err := lib.LookupDSYNCTarget(lookupzone, lookupserver, dns.StringToType[ntype], notify_scheme)
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+	   log.Fatalf("Error from LookupDSYNCTarget(%s, %s): %v", lookupzone, lookupserver, err)
 	}
 
-	if verbose {
-	   fmt.Printf("%s has the IP addresses: %v\n", notify.Dest, dest_addrs)
-	}
-
-	for _, dst := range dest_addrs {
-		if verbose {
-			fmt.Printf("Sending NOTIFY(%s) to %s on address %s:%d\n", ntype, notify.Dest, dst, notify.Port)
+	for _, dst := range dsynctarget.Addresses {
+		if lib.Global.Verbose {
+			fmt.Printf("Sending NOTIFY(%s) to %s on address %s:%d\n",
+				ntype, dsynctarget.Name, dst, dsynctarget.Port)
 		}
 
 		m := new(dns.Msg)
 		m.SetNotify(zonename)
 
 		// remove SOA, add ntype
-		m.Question = []dns.Question{ dns.Question{zonename, notify_type, dns.ClassINET} } 
+		m.Question = []dns.Question{dns.Question{zonename, dns.StringToType[ntype], dns.ClassINET}}
 
-		if debug {
+		if lib.Global.Debug {
 			fmt.Printf("Sending Notify:\n%s\n", m.String())
 		}
 
-		dst = net.JoinHostPort(dst, fmt.Sprintf("%d", notify.Port))
+		dst = net.JoinHostPort(dst, fmt.Sprintf("%d", dsynctarget.Port))
 		res, err := dns.Exchange(m, dst)
 		if err != nil {
 			log.Fatalf("Error from dns.Exchange(%s, NOTIFY(%s)): %v", dst, ntype, err)
 		}
 
 		if res.Rcode != dns.RcodeSuccess {
-		   	if verbose {
-			   fmt.Printf("... and got rcode %s back (bad)\n", dns.RcodeToString[res.Rcode])
+			if lib.Global.Verbose {
+				fmt.Printf("... and got rcode %s back (bad)\n",
+					dns.RcodeToString[res.Rcode])
 			}
 			log.Printf("Error: Rcode: %s", dns.RcodeToString[res.Rcode])
 		} else {
-			if verbose {
+			if lib.Global.Verbose {
 				fmt.Printf("... and got rcode NOERROR back (good)\n")
 			}
 			break
 		}
 	}
-}
-
-func ParentZone(z, imr string) string {
-	labels := strings.Split(z, ".")
-	var parent string
-
-	if len(labels) == 1 {
-		return z
-	} else if len(labels) > 1 {
-		upone := dns.Fqdn(strings.Join(labels[1:], "."))
-
-		m := new(dns.Msg)
-		m.SetQuestion(upone, dns.TypeSOA)
-		m.SetEdns0(4096, true)
-		m.CheckingDisabled = true
-
-		r, err := dns.Exchange(m, imr)
-		if err != nil {
-			return fmt.Sprintf("Error from dns.Exchange: %v\n", err)
-		}
-		if r != nil {
-			if len(r.Answer) != 0 {
-				parent = r.Answer[0].Header().Name
-				return parent
-			}
-			if len(r.Ns) > 0 {
-				for _, rr := range r.Ns {
-					if rr.Header().Rrtype == dns.TypeSOA {
-						parent = r.Ns[0].Header().Name
-						return parent
-					}
-				}
-			}
-
-			log.Printf("ParentZone: ERROR: Failed to locate parent of '%s' via Answer and Authority. Now guessing.", z)
-			return upone
-		}
-	}
-	log.Printf("ParentZone: had difficulties splitting zone '%s'\n", z)
-	return z
 }

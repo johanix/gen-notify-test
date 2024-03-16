@@ -44,8 +44,10 @@ func main() {
 	}
 
 	scannerq := make(chan ScanRequest, 5)
-	go ScannerEngine(scannerq)
-	go DnsEngine(scannerq)
+	updateq := make(chan UpdateRequest, 5)
+	go ScannerEngine(scannerq, updateq)
+	go UpdaterEngine(updateq)
+	go DnsEngine(scannerq, updateq)
 
 	mainloop()
 }
